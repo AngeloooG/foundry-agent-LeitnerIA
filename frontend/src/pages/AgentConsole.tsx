@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import type { Page } from "../App";
 import { useAuth } from "../hooks/useAuth";
 
@@ -9,6 +9,12 @@ import {
     type AgentAnnotation,
 } from "../services/agentStreamClient";
 
+import {
+    formatAttachmentConstraints,
+    mergeAttachmentSelection,
+    prepareAgentAttachments,
+    removeAttachmentAt,
+} from "../services/agentAttachments";
 import {
     buildBattlecardPrompt,
     initialBattlecardForm,
@@ -89,6 +95,11 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
 
     const chatEndRef = useRef<HTMLDivElement | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+    const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -163,7 +174,64 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         );
     };
 
-    const runAgent = async (message: string, mode: "chat" | "form") => {
+    const addSelectedFiles = (incomingFiles: File[]) => {
+        if (incomingFiles.length === 0 || isStreaming) {
+            return;
+        }
+
+        const { acceptedFiles, rejectedMessages } =
+            mergeAttachmentSelection(selectedFiles, incomingFiles);
+
+        if (acceptedFiles.length > 0) {
+            setSelectedFiles((previous) => [
+                ...previous,
+                ...acceptedFiles,
+            ]);
+            setHasPreparedPrompt(false);
+        }
+
+        setAttachmentErrors(rejectedMessages);
+    };
+
+    const handleFileInputChange = (
+        event: ChangeEvent<HTMLInputElement>
+    ) => {
+        addSelectedFiles(Array.from(event.target.files ?? []));
+        event.target.value = "";
+    };
+
+    const handleFileDrop = (event: DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDraggingFiles(false);
+        addSelectedFiles(Array.from(event.dataTransfer.files));
+    };
+
+    const removeSelectedFile = (index: number) => {
+        if (isStreaming) {
+            return;
+        }
+
+        setSelectedFiles((previous) => removeAttachmentAt(previous, index));
+        setAttachmentErrors([]);
+        setHasPreparedPrompt(false);
+    };
+
+    const clearSelectedFiles = () => {
+        if (isStreaming) {
+            return;
+        }
+
+        setSelectedFiles([]);
+        setAttachmentErrors([]);
+        setHasPreparedPrompt(false);
+    };
+
+    const runAgent = async (
+        message: string,
+        mode: "chat" | "form",
+        files: File[]
+    ) => {
         if (isStreaming) return;
 
         const trimmedMessage = message.trim();
@@ -193,6 +261,10 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                 return;
             }
 
+            setIsPreparingAttachments(files.length > 0);
+            const preparedAttachments = await prepareAgentAttachments(files);
+            setIsPreparingAttachments(false);
+
             let streamedText = "";
             const collectedAnnotations: AgentAnnotation[] = [];
 
@@ -201,8 +273,8 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                     message: trimmedMessage,
                     token,
                     conversationId,
-                    imageDataUris: [],
-                    fileDataUris: [],
+                    imageDataUris: preparedAttachments.imageDataUris,
+                    fileDataUris: preparedAttachments.fileDataUris,
                     signal: controller.signal,
                 },
                 {
@@ -228,6 +300,11 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                     },
                 }
             );
+
+            if (files.length > 0) {
+                setSelectedFiles([]);
+                setAttachmentErrors([]);
+            }
 
             const downloadUrlFromText = extractFirstDownloadUrl(streamedText);
             const downloadUrlFromAnnotation = collectedAnnotations.find((item) => item.url)?.url;
@@ -261,6 +338,7 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                 );
             }
         } finally {
+            setIsPreparingAttachments(false);
             setIsStreaming(false);
             setToolStatus("");
             abortControllerRef.current = null;
@@ -275,13 +353,14 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         }
 
         const mode = hasPreparedPrompt ? "form" : "chat";
+        const filesToSend = [...selectedFiles];
 
         setChatInput("");
         setHasPreparedPrompt(false);
 
         addMessage("user", text);
 
-        await runAgent(text, mode);
+        await runAgent(text, mode, filesToSend);
     };
 
     const cancelStreaming = () => {
@@ -300,7 +379,10 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
             return;
         }
 
-        const generatedPrompt = buildBattlecardPrompt(form);
+        const generatedPrompt = buildBattlecardPrompt(
+            form,
+            selectedFiles.map((file) => file.name)
+        );
 
         setChatInput(generatedPrompt);
         setHasPreparedPrompt(true);
@@ -333,6 +415,9 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         setAnnotations([]);
         setHasPreparedPrompt(false);
         setFormErrors({});
+        setSelectedFiles([]);
+        setAttachmentErrors([]);
+        setIsDraggingFiles(false);
     };
 
     const buildSuggestedFileName = () => {
@@ -640,28 +725,120 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                             </Field>
                         </div>
 
-                        <div
-                            className="upload-box upload-box--pending"
-                            aria-disabled="true"
-                        >
-                            <span
-                                className="upload-box__icon"
-                                aria-hidden="true"
+                        <div className="attachment-section">
+                            <div className="attachment-section__heading">
+                                <div>
+                                    <strong>Archivos de referencia</strong>
+                                    <span>Opcional</span>
+                                </div>
+
+                                {selectedFiles.length > 0 && (
+                                    <button
+                                        type="button"
+                                        className="clear-files-button"
+                                        onClick={clearSelectedFiles}
+                                        disabled={isStreaming}
+                                    >
+                                        Quitar todos
+                                    </button>
+                                )}
+                            </div>
+
+                            <input
+                                ref={fileInputRef}
+                                className="visually-hidden-file-input"
+                                type="file"
+                                multiple
+                                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,text/html,application/xml,text/xml,.md,.markdown,.txt,.csv,.json,.html,.htm,.xml,.pdf"
+                                onChange={handleFileInputChange}
+                                disabled={isStreaming}
+                            />
+
+                            <div
+                                className={
+                                    isDraggingFiles
+                                        ? "upload-box upload-box--active"
+                                        : "upload-box"
+                                }
+                                role="button"
+                                tabIndex={isStreaming ? -1 : 0}
+                                aria-label="Seleccionar o arrastrar archivos de referencia"
+                                onClick={() => {
+                                    if (!isStreaming) {
+                                        fileInputRef.current?.click();
+                                    }
+                                }}
+                                onKeyDown={(event) => {
+                                    if (
+                                        !isStreaming &&
+                                        (event.key === "Enter" || event.key === " ")
+                                    ) {
+                                        event.preventDefault();
+                                        fileInputRef.current?.click();
+                                    }
+                                }}
+                                onDragEnter={(event) => {
+                                    event.preventDefault();
+                                    if (!isStreaming) setIsDraggingFiles(true);
+                                }}
+                                onDragOver={(event) => {
+                                    event.preventDefault();
+                                    if (!isStreaming) setIsDraggingFiles(true);
+                                }}
+                                onDragLeave={(event) => {
+                                    event.preventDefault();
+                                    if (event.currentTarget === event.target) {
+                                        setIsDraggingFiles(false);
+                                    }
+                                }}
+                                onDrop={handleFileDrop}
+                                aria-disabled={isStreaming}
                             >
-                                +
-                            </span>
+                                <span className="upload-box__icon" aria-hidden="true">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                        <path d="M12 16V4M7 9l5-5 5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                        <path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                                    </svg>
+                                </span>
+                                <strong>Selecciona o arrastra archivos</strong>
+                                <span>PDF, TXT, MD, CSV, JSON, HTML, XML o imágenes</span>
+                                <small>{formatAttachmentConstraints()}</small>
+                            </div>
 
-                            <strong>
-                                Archivos de referencia
-                            </strong>
+                            {attachmentErrors.length > 0 && (
+                                <div className="attachment-errors" role="alert">
+                                    <strong>No se agregaron algunos archivos</strong>
+                                    <ul>
+                                        {attachmentErrors.map((error) => (
+                                            <li key={error}>{error}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
-                            <span>
-                                PDF, TXT, Markdown, CSV, JSON, HTML, XML o imágenes
-                            </span>
-
-                            <small>
-                                La selección real de archivos se habilitará en el Lote 2B.
-                            </small>
+                            {selectedFiles.length > 0 && (
+                                <div className="selected-files" aria-label="Archivos seleccionados">
+                                    {selectedFiles.map((file, index) => (
+                                        <div className="selected-file" key={`${file.name}-${file.size}-${file.lastModified}`}>
+                                            <span className="selected-file__icon" aria-hidden="true">
+                                                {file.type.startsWith("image/") ? "IMG" : "DOC"}
+                                            </span>
+                                            <span className="selected-file__content">
+                                                <strong title={file.name}>{file.name}</strong>
+                                                <small>{formatFileSize(file.size)}</small>
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeSelectedFile(index)}
+                                                disabled={isStreaming}
+                                                aria-label={`Quitar ${file.name}`}
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <button
@@ -738,6 +915,12 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                             </div>
                         ))}
 
+                        {isPreparingAttachments && (
+                            <div className="tool-status">
+                                <span className="pulse-dot" />
+                                Preparando archivos adjuntos...
+                            </div>
+                        )}
                         {toolStatus && (
                             <div className="tool-status">
                                 <span className="pulse-dot" />
@@ -869,6 +1052,19 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                             />
 
                             <div className="input-actions">
+                                <button
+                                    type="button"
+                                    className="attach-chat-button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isStreaming}
+                                    aria-label="Adjuntar archivos al mensaje"
+                                    title="Adjuntar archivos"
+                                >
+                                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M21.4 11.6l-8.9 8.9a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                    <span>{selectedFiles.length > 0 ? selectedFiles.length : ""}</span>
+                                </button>
                                 {isStreaming ? (
                                     <button
                                         type="button"
@@ -893,7 +1089,9 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                         <small className="chat-input-help">
                             {hasPreparedPrompt
                                 ? "Revisa la solicitud completa. En este modo debes usar el botón Enviar."
-                                : "Presiona Enter para enviar o Shift + Enter para crear una nueva línea."}
+                                : selectedFiles.length > 0
+                                    ? `${selectedFiles.length} archivo(s) se enviarán con el mensaje.`
+                                    : "Presiona Enter para enviar o Shift + Enter para crear una nueva línea."}
                         </small>
                     </div>
                 </section>
@@ -1231,52 +1429,178 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         text-transform: uppercase;
         }
 
+        .attachment-section {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .attachment-section__heading {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .attachment-section__heading > div {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .attachment-section__heading strong {
+          color: #123263;
+          font-size: 12px;
+        }
+        .attachment-section__heading span {
+          border-radius: 999px;
+          padding: 3px 7px;
+          background: #eef2f6;
+          color: #718096;
+          font-size: 9px;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+        .clear-files-button {
+          border: 0;
+          background: transparent;
+          color: #64748b;
+          padding: 4px;
+          font-size: 10px;
+          font-weight: 750;
+        }
+        .clear-files-button:hover { color: #b91c1c; }
+        .visually-hidden-file-input {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
+        }
         .upload-box {
-        border: 1.5px dashed #cbd8e5;
-        border-radius: 11px;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 5px;
-        background: #f8fafc;
-        text-align: center;
+          border: 1.5px dashed #b9cad9;
+          border-radius: 11px;
+          padding: 17px 14px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          background: #f8fafc;
+          text-align: center;
+          cursor: pointer;
+          outline: none;
+          transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
         }
-
-        .upload-box--pending {
-        opacity: 0.8;
+        .upload-box:hover,
+        .upload-box:focus-visible,
+        .upload-box--active {
+          border-color: #4389b5;
+          background: #eef7fc;
+          box-shadow: 0 0 0 3px rgba(124, 188, 227, 0.14);
         }
-
+        .upload-box[aria-disabled="true"] {
+          cursor: not-allowed;
+          opacity: 0.65;
+        }
         .upload-box__icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 9px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: #e8f2fa;
-        color: #005b96;
-        font-size: 20px;
-        line-height: 1;
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #e8f2fa;
+          color: #005b96;
         }
-
-        .upload-box strong {
-        color: #334155;
-        font-size: 11px;
+        .upload-box strong { color: #334155; font-size: 11px; }
+        .upload-box > span:not(.upload-box__icon) { color: #64748b; font-size: 10px; line-height: 1.4; }
+        .upload-box small { max-width: 340px; color: #8492a3; font-size: 9px; line-height: 1.45; }
+        .attachment-errors {
+          border: 1px solid #fecaca;
+          border-radius: 9px;
+          padding: 10px 11px;
+          background: #fef2f2;
+          color: #991b1b;
         }
-
-        .upload-box > span:not(.upload-box__icon) {
-        color: #64748b;
-        font-size: 10px;
-        line-height: 1.4;
+        .attachment-errors strong { display: block; font-size: 10px; }
+        .attachment-errors ul { margin: 5px 0 0; padding-left: 17px; }
+        .attachment-errors li { font-size: 9px; line-height: 1.5; }
+        .selected-files { display: grid; gap: 8px; }
+        .selected-file {
+          min-width: 0;
+          display: grid;
+          grid-template-columns: 34px minmax(0, 1fr) 28px;
+          gap: 9px;
+          align-items: center;
+          border: 1px solid #dbe7f0;
+          border-radius: 9px;
+          padding: 8px;
+          background: #ffffff;
         }
-
-        .upload-box small {
-        color: #94a3b8;
-        font-size: 9px;
-        line-height: 1.4;
+        .selected-file__icon {
+          width: 34px;
+          height: 34px;
+          border-radius: 8px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #edf5fb;
+          color: #005b96;
+          font-size: 8px;
+          font-weight: 900;
         }
-
+        .selected-file__content { min-width: 0; }
+        .selected-file__content strong,
+        .selected-file__content small { display: block; }
+        .selected-file__content strong {
+          overflow: hidden;
+          color: #334155;
+          font-size: 10px;
+          line-height: 1.35;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .selected-file__content small { margin-top: 2px; color: #8492a3; font-size: 9px; }
+        .selected-file > button {
+          width: 28px;
+          height: 28px;
+          border: 0;
+          border-radius: 7px;
+          background: transparent;
+          color: #64748b;
+          font-size: 18px;
+          line-height: 1;
+        }
+        .selected-file > button:hover { background: #fef2f2; color: #b91c1c; }
+        .attach-chat-button {
+          position: relative;
+          min-width: 42px;
+          height: 42px;
+          border: 1px solid #d8e2ec;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #f8fafc;
+          color: #005b96;
+        }
+        .attach-chat-button:hover { border-color: #7cbce3; background: #eef7fc; }
+        .attach-chat-button span:not(:empty) {
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #8cc63f;
+          color: #ffffff;
+          font-size: 9px;
+          font-weight: 900;
+        }
         .prepare-prompt-button {
         width: 100%;
         min-height: 44px;
@@ -1784,6 +2108,16 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           .chat-input-row {
             grid-template-columns: 1fr;
           }
+          .input-actions {
+            width: 100%;
+          }
+          .input-actions .dark-btn,
+          .input-actions .cancel-btn {
+            flex: 1;
+          }
+          .selected-file {
+            grid-template-columns: 32px minmax(0, 1fr) 28px;
+          }
 
           .msg {
             max-width: 94%;
@@ -1792,6 +2126,12 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
       `}</style>
         </main>
     );
+}
+
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Field({
