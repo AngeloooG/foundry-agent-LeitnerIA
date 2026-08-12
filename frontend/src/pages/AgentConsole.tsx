@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
-import type { Page } from "../App";
 import { useAuth } from "../hooks/useAuth";
 
 import {
@@ -24,9 +23,6 @@ import {
     type BattlecardForm,
     type BattlecardFormErrors,
 } from "./agentConsoleForm";
-interface Props {
-    onNavigate: (page: Page, id?: number) => void;
-}
 
 type MessageRole = "user" | "agent" | "system";
 
@@ -64,7 +60,7 @@ function createId() {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
+export default function AgentConsole() {
     const { getAccessToken } = useAuth();
 
     const [form, setForm] = useState<BattlecardForm>(
