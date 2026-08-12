@@ -1,39 +1,58 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { PublicClientApplication, EventType, type AuthenticationResult } from "@azure/msal-browser";
+
+import {
+  EventType,
+  PublicClientApplication,
+  type AuthenticationResult,
+} from "@azure/msal-browser";
+
 import { MsalProvider } from "@azure/msal-react";
+import { BrowserRouter } from "react-router";
+
 import App from "./App";
+import { ThemeProvider } from "./components/ThemeProvider";
 import { msalConfig } from "./config/authConfig";
+import { AppProvider } from "./contexts/AppContext";
+import { initTelemetry } from "./services/telemetry";
+
 import "./index.css";
-import { AppProvider } from './contexts/AppContext';
-import { ThemeProvider } from './components/ThemeProvider';
-import { initTelemetry } from './services/telemetry';
 
 initTelemetry();
 
-// Initialize MSAL instance
-const msalInstance = new PublicClientApplication(msalConfig);
+const msalInstance = new PublicClientApplication(
+  msalConfig
+);
 
-// Handle redirect promise (required for PKCE flow)
 msalInstance.initialize().then(() => {
-  // Account selection logic (optional, handles multiple accounts)
   const accounts = msalInstance.getAllAccounts();
+
   if (accounts.length > 0) {
     msalInstance.setActiveAccount(accounts[0]);
   }
 
   msalInstance.addEventCallback((event) => {
-    if (event.eventType === EventType.LOGIN_SUCCESS && event.payload) {
-      const payload = event.payload as AuthenticationResult;
-      const account = payload.account;
-      msalInstance.setActiveAccount(account);
+    if (
+      event.eventType === EventType.LOGIN_SUCCESS &&
+      event.payload
+    ) {
+      const authenticationResult =
+        event.payload as AuthenticationResult;
+
+      msalInstance.setActiveAccount(
+        authenticationResult.account
+      );
     }
   });
 
-  const rootElement = document.getElementById("root");
-  
+  const rootElement =
+    document.getElementById("root");
+
   if (!rootElement) {
-    console.error('Failed to find the root element');
+    console.error(
+      "Failed to find the root element"
+    );
+
     return;
   }
 
@@ -42,7 +61,9 @@ msalInstance.initialize().then(() => {
       <MsalProvider instance={msalInstance}>
         <AppProvider>
           <ThemeProvider>
-            <App />
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
           </ThemeProvider>
         </AppProvider>
       </MsalProvider>
