@@ -2,13 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Page } from "../App";
 import { useAuth } from "../hooks/useAuth";
+
 import {
     extractFirstDownloadUrl,
     streamAgentMessage,
     type AgentAnnotation,
 } from "../services/agentStreamClient";
-import { updateFormField } from "./agentConsoleForm";
 
+import {
+    buildBattlecardPrompt,
+    initialBattlecardForm,
+    isBattlecardFormValid,
+    updateFormField,
+    validateBattlecardForm,
+    type BattlecardForm,
+    type BattlecardFormErrors,
+} from "./agentConsoleForm";
 interface Props {
     onNavigate: (page: Page, id?: number) => void;
 }
@@ -38,26 +47,6 @@ const sectorOptions = [
     "Gobierno",
 ];
 
-const servicioOptions = [
-    "Migración a Microsoft Azure",
-    "IA y automatización de procesos",
-    "Ciberseguridad",
-    "Modernización de infraestructura",
-    "Microsoft 365",
-    "Power Platform",
-    "Gobierno de datos",
-];
-
-const productoOptions = [
-    "Azure OpenAI",
-    "Microsoft Copilot",
-    "Power Automate",
-    "Azure AI Search",
-    "SharePoint",
-    "Microsoft Defender",
-    "Microsoft Fabric",
-];
-
 const quickPrompts = [
     "Quiero comparar CONSEIN contra un competidor.",
     "Ayúdame a crear una Battlecard por servicio.",
@@ -69,32 +58,31 @@ function createId() {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export default function AgentConsole({ onNavigate }: Props) {
+export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
     const { getAccessToken } = useAuth();
 
-    const [form, setForm] = useState({
-        empresa: "CONSEIN",
-        competidor: "",
-        sector: "",
-        servicio: "",
-        producto: "",
-        contexto: "",
-        objetivo: "",
-    });
+    const [form, setForm] = useState<BattlecardForm>(
+        initialBattlecardForm
+    );
+
+    const [formErrors, setFormErrors] =
+        useState<BattlecardFormErrors>({});
+
+    const [hasPreparedPrompt, setHasPreparedPrompt] =
+        useState(false);
 
     const [messages, setMessages] = useState<ChatMessage[]>([
         {
             id: createId(),
             role: "agent",
             text:
-                "Hola, soy Leitner IA. Puedes interactuar conmigo de dos formas: escribe libremente en el chat o completa el formulario para generar una Battlecard estructurada.",
+                "Hola, soy Leitner IA. Puedes conversar conmigo libremente o completar el formulario para preparar una solicitud estructurada. El formulario no enviará nada automáticamente: podrás revisar y editar la solicitud antes de enviarla.",
         },
     ]);
 
     const [chatInput, setChatInput] = useState("");
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isStreaming, setIsStreaming] = useState(false);
-    const [activeMode, setActiveMode] = useState<"chat" | "form" | null>(null);
     const [toolStatus, setToolStatus] = useState<string>("");
     const [result, setResult] = useState<BattlecardResult | null>(null);
     const [annotations, setAnnotations] = useState<AgentAnnotation[]>([]);
@@ -106,12 +94,32 @@ export default function AgentConsole({ onNavigate }: Props) {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, isStreaming]);
 
-    const canGenerateFromForm = useMemo(() => {
-        return Boolean(form.empresa.trim() && form.competidor.trim());
-    }, [form.empresa, form.competidor]);
+    const canPreparePrompt = useMemo(
+        () => isBattlecardFormValid(form),
+        [form]
+    );
 
-    const setField = (field: keyof typeof form, value: string) => {
-        setForm((prev) => updateFormField(prev, field, value));
+    const setField = <Field extends keyof BattlecardForm>(
+        field: Field,
+        value: BattlecardForm[Field]
+    ) => {
+        setForm((previous) =>
+            updateFormField(previous, field, value)
+        );
+
+        setFormErrors((previous) => {
+            const nextErrors = {
+                ...previous,
+            };
+
+            delete nextErrors[
+                field as keyof BattlecardFormErrors
+            ];
+
+            return nextErrors;
+        });
+
+        setHasPreparedPrompt(false);
     };
 
     const addMessage = (role: MessageRole, text: string) => {
@@ -155,41 +163,6 @@ export default function AgentConsole({ onNavigate }: Props) {
         );
     };
 
-    const buildFormPrompt = () => {
-        return `
-Actúa como Leitner IA, agente de inteligencia competitiva de CONSEIN.
-
-Genera una Battlecard competitiva usando la información siguiente:
-
-Empresa principal: ${form.empresa || "CONSEIN"}
-Empresa competidora: ${form.competidor}
-Sector o rubro: ${form.sector || "No especificado"}
-Servicio a comparar: ${form.servicio || "No especificado"}
-Producto o solución: ${form.producto || "No especificado"}
-Contexto de la oportunidad: ${form.contexto || "No especificado"}
-Objetivo comercial: ${form.objetivo || "No especificado"}
-
-Instrucciones obligatorias:
-1. Si la información suministrada es suficiente, no hagas preguntas adicionales.
-2. Usa el conocimiento disponible del agente, conocimiento web y herramientas conectadas si están disponibles.
-3. Construye una Battlecard comercial accionable para equipos de ventas.
-4. Incluye como mínimo:
-   - Resumen ejecutivo.
-   - Posicionamiento recomendado para CONSEIN.
-   - Ventajas competitivas.
-   - Riesgos o debilidades frente al competidor.
-   - Objeciones probables del cliente.
-   - Respuestas comerciales recomendadas.
-   - Recomendaciones finales para la conversación comercial.
-5. Si existe una herramienta para generar documento Word, PDF o archivo final, ejecútala.
-6. Si generas un documento, devuelve claramente el nombre del archivo y el enlace de descarga.
-7. Mantén la respuesta en español profesional, precisa y orientada a venta consultiva.
-
-Resultado esperado:
-Una Battlecard lista para revisión comercial.
-`.trim();
-    };
-
     const runAgent = async (message: string, mode: "chat" | "form") => {
         if (isStreaming) return;
 
@@ -200,7 +173,6 @@ Una Battlecard lista para revisión comercial.
         }
 
         setIsStreaming(true);
-        setActiveMode(mode);
         setToolStatus("");
         setAnnotations([]);
         setResult(null);
@@ -290,7 +262,6 @@ Una Battlecard lista para revisión comercial.
             }
         } finally {
             setIsStreaming(false);
-            setActiveMode(null);
             setToolStatus("");
             abortControllerRef.current = null;
         }
@@ -303,33 +274,47 @@ Una Battlecard lista para revisión comercial.
             return;
         }
 
+        const mode = hasPreparedPrompt ? "form" : "chat";
+
         setChatInput("");
+        setHasPreparedPrompt(false);
+
         addMessage("user", text);
-        await runAgent(text, "chat");
-    };
 
-    const generateBattlecardFromForm = async () => {
-        if (!canGenerateFromForm) {
-            addMessage(
-                "agent",
-                "Para generar la Battlecard desde el formulario necesito al menos la empresa principal y la empresa competidora."
-            );
-            return;
-        }
-
-        const prompt = buildFormPrompt();
-
-        addMessage(
-            "user",
-            `Generar Battlecard estructurada: ${form.empresa} vs ${form.competidor}`
-        );
-
-        await runAgent(prompt, "form");
+        await runAgent(text, mode);
     };
 
     const cancelStreaming = () => {
         abortControllerRef.current?.abort();
     };
+
+    const prepareBattlecardPrompt = () => {
+        const errors = validateBattlecardForm(form);
+        setFormErrors(errors);
+
+        if (Object.keys(errors).length > 0) {
+            addMessage(
+                "system",
+                "Completa los campos obligatorios del formulario antes de preparar la solicitud."
+            );
+            return;
+        }
+
+        const generatedPrompt = buildBattlecardPrompt(form);
+
+        setChatInput(generatedPrompt);
+        setHasPreparedPrompt(true);
+
+        requestAnimationFrame(() => {
+            chatEndRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "end",
+            });
+        });
+    };
+
+
+
 
     const resetConversation = () => {
         abortControllerRef.current?.abort();
@@ -339,20 +324,37 @@ Una Battlecard lista para revisión comercial.
                 id: createId(),
                 role: "agent",
                 text:
-                    "Conversación reiniciada. Puedes escribir una solicitud libre o completar el formulario para generar una Battlecard.",
+                    "Conversación reiniciada. Puedes escribir una solicitud libre o completar el formulario para preparar una solicitud estructurada.",
             },
         ]);
         setChatInput("");
         setToolStatus("");
         setResult(null);
         setAnnotations([]);
+        setHasPreparedPrompt(false);
+        setFormErrors({});
     };
 
     const buildSuggestedFileName = () => {
-        const competitor = form.competidor.trim() || "Competidor";
-        const sanitizedCompetitor = competitor.replace(/[^\wáéíóúÁÉÍÓÚñÑ-]+/g, "_");
+        const company = form.company.trim() || "CONSEIN";
 
-        return `Battlecard_${form.empresa || "CONSEIN"}_vs_${sanitizedCompetitor}_${new Date()
+        const competitorSummary =
+            form.competitors
+                .split(/[,;\n]/)
+                .map((item) => item.trim())
+                .find(Boolean) || "Competencia";
+
+        const sanitizedCompany = company.replace(
+            /[^\wáéíóúÁÉÍÓÚñÑ-]+/g,
+            "_"
+        );
+
+        const sanitizedCompetitor = competitorSummary.replace(
+            /[^\wáéíóúÁÉÍÓÚñÑ-]+/g,
+            "_"
+        );
+
+        return `Battlecard_${sanitizedCompany}_vs_${sanitizedCompetitor}_${new Date()
             .toISOString()
             .slice(0, 10)}.docx`;
     };
@@ -379,112 +381,318 @@ Una Battlecard lista para revisión comercial.
             <section className="container agent-layout">
                 <aside className="card form-panel">
                     <div className="form-head">
-                        <strong>Parámetros del análisis</strong>
-                        <small>Completa el formulario para generar una Battlecard directa</small>
+                        <div>
+                            <strong>Preparar una Battlecard</strong>
+                            <small>
+                                Responde cinco preguntas para construir una solicitud precisa.
+                            </small>
+                        </div>
+
+                        <span className="form-progress">
+                            5 preguntas
+                        </span>
                     </div>
 
                     <div className="form-body">
-                        <Field label="Empresa principal" required>
+                        <div className="form-introduction">
+                            <strong>Generación guiada</strong>
+
+                            <p>
+                                El formulario preparará una instrucción editable en el chat.
+                                Nada se enviará hasta que presiones Enviar.
+                            </p>
+                        </div>
+
+                        <Field
+                            label="Empresa principal"
+                            helpText="Empresa cuya oferta quieres posicionar."
+                        >
                             <input
-                                value={form.empresa}
-                                onChange={(event) => setField("empresa", event.target.value)}
+                                value={form.company}
+                                onChange={(event) =>
+                                    setField("company", event.target.value)
+                                }
                                 disabled={isStreaming}
-                                placeholder="CONSEIN"
+                                placeholder="Ej.: CONSEIN"
                             />
                         </Field>
 
-                        <Field label="Empresa competidora" required>
-                            <input
-                                value={form.competidor}
-                                onChange={(event) => setField("competidor", event.target.value)}
-                                disabled={isStreaming}
-                                placeholder="Ej: IBM, Accenture, Oracle..."
-                            />
-                        </Field>
-
-                        <Field label="Sector o rubro">
-                            <select
-                                value={form.sector}
-                                onChange={(event) => setField("sector", event.target.value)}
-                                disabled={isStreaming}
-                            >
-                                <option value="">Seleccionar sector...</option>
-                                {sectorOptions.map((item) => (
-                                    <option key={item} value={item}>
-                                        {item}
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        <Field label="Servicio a comparar">
-                            <select
-                                value={form.servicio}
-                                onChange={(event) => setField("servicio", event.target.value)}
-                                disabled={isStreaming}
-                            >
-                                <option value="">Seleccionar servicio...</option>
-                                {servicioOptions.map((item) => (
-                                    <option key={item} value={item}>
-                                        {item}
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        <Field label="Producto o solución">
-                            <select
-                                value={form.producto}
-                                onChange={(event) => setField("producto", event.target.value)}
-                                disabled={isStreaming}
-                            >
-                                <option value="">Seleccionar producto...</option>
-                                {productoOptions.map((item) => (
-                                    <option key={item} value={item}>
-                                        {item}
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        <Field label="Contexto de la oportunidad">
+                        <Field
+                            label="1. ¿Qué producto, servicio o solución estás ofreciendo?"
+                            required
+                            error={formErrors.offering}
+                            helpText="Explica la oferta con suficiente detalle. Puedes incluir tecnologías, alcance y modalidad del servicio."
+                        >
                             <textarea
-                                value={form.contexto}
-                                onChange={(event) => setField("contexto", event.target.value)}
+                                value={form.offering}
+                                onChange={(event) =>
+                                    setField("offering", event.target.value)
+                                }
                                 disabled={isStreaming}
-                                placeholder="Describe el contexto de la oportunidad comercial..."
+                                rows={4}
+                                placeholder="Ej.: Implementación de Microsoft Copilot Studio integrada con Power Automate, Azure AI Search y los sistemas internos del cliente."
                             />
                         </Field>
 
-                        <Field label="Objetivo comercial">
-                            <input
-                                value={form.objetivo}
-                                onChange={(event) => setField("objetivo", event.target.value)}
+                        <Field
+                            label="2. ¿Quién es el cliente ideal o avatar de decisión?"
+                            required
+                            error={formErrors.targetCustomer}
+                            helpText="Describe la organización, el sector, el cargo del decisor y sus prioridades."
+                        >
+                            <textarea
+                                value={form.targetCustomer}
+                                onChange={(event) =>
+                                    setField(
+                                        "targetCustomer",
+                                        event.target.value
+                                    )
+                                }
                                 disabled={isStreaming}
-                                placeholder="Ej: Ganar licitación de infraestructura Azure..."
+                                rows={4}
+                                placeholder="Ej.: Banco mediano. El decisor principal es el Director de Operaciones, acompañado por Tecnología y Cumplimiento."
                             />
                         </Field>
 
-                        <div className="upload-box" aria-disabled="true">
-                            <div>⇧</div>
-                            <span>PDF, Word, Excel o PowerPoint</span>
-                            <small>Preparado visualmente. La carga real se integra en una fase posterior.</small>
+                        <Field
+                            label="3. ¿Contra qué empresas, soluciones o alternativas compites?"
+                            required
+                            error={formErrors.competitors}
+                            helpText="Incluye proveedores, productos, desarrollo interno, procesos manuales o la opción de no hacer nada."
+                        >
+                            <textarea
+                                value={form.competitors}
+                                onChange={(event) =>
+                                    setField(
+                                        "competitors",
+                                        event.target.value
+                                    )
+                                }
+                                disabled={isStreaming}
+                                rows={3}
+                                placeholder="Ej.: IBM, Accenture, UiPath, desarrollo interno y mantener el proceso manual actual."
+                            />
+                        </Field>
+
+                        <Field
+                            label="4. ¿Qué resultado desea lograr el cliente?"
+                            required
+                            error={formErrors.desiredOutcome}
+                            helpText="Describe el resultado de negocio esperado, no solamente el objetivo de vender."
+                        >
+                            <textarea
+                                value={form.desiredOutcome}
+                                onChange={(event) =>
+                                    setField(
+                                        "desiredOutcome",
+                                        event.target.value
+                                    )
+                                }
+                                disabled={isStreaming}
+                                rows={4}
+                                placeholder="Ej.: Reducir el tiempo de atención, mantener trazabilidad y desplegar la solución en menos de tres meses."
+                            />
+                        </Field>
+
+                        <fieldset className="analysis-fieldset">
+                            <legend>
+                                5. ¿Qué enfoque debe aplicar el análisis?
+                                <span aria-hidden="true"> *</span>
+                            </legend>
+
+                            <p className="analysis-description">
+                                Selecciona el nivel de rigurosidad que debe aplicar Leitner IA.
+                            </p>
+
+                            <div className="analysis-options">
+                                <label
+                                    className={
+                                        form.analysisApproach === "strategic"
+                                            ? "analysis-option analysis-option--selected"
+                                            : "analysis-option"
+                                    }
+                                >
+                                    <input
+                                        type="radio"
+                                        name="analysisApproach"
+                                        value="strategic"
+                                        checked={
+                                            form.analysisApproach ===
+                                            "strategic"
+                                        }
+                                        disabled={isStreaming}
+                                        onChange={() =>
+                                            setField(
+                                                "analysisApproach",
+                                                "strategic"
+                                            )
+                                        }
+                                    />
+
+                                    <span className="analysis-option__control" />
+
+                                    <span className="analysis-option__content">
+                                        <strong>
+                                            Estratégico basado en evidencia
+                                        </strong>
+
+                                        <small>
+                                            Construye el posicionamiento comercial más sólido,
+                                            identificando claramente las inferencias.
+                                        </small>
+                                    </span>
+                                </label>
+
+                                <label
+                                    className={
+                                        form.analysisApproach === "verified"
+                                            ? "analysis-option analysis-option--selected"
+                                            : "analysis-option"
+                                    }
+                                >
+                                    <input
+                                        type="radio"
+                                        name="analysisApproach"
+                                        value="verified"
+                                        checked={
+                                            form.analysisApproach ===
+                                            "verified"
+                                        }
+                                        disabled={isStreaming}
+                                        onChange={() =>
+                                            setField(
+                                                "analysisApproach",
+                                                "verified"
+                                            )
+                                        }
+                                    />
+
+                                    <span className="analysis-option__control" />
+
+                                    <span className="analysis-option__content">
+                                        <strong>
+                                            Estrictamente verificado
+                                        </strong>
+
+                                        <small>
+                                            Incluye únicamente afirmaciones confirmables y
+                                            señala cualquier información no verificada.
+                                        </small>
+                                    </span>
+                                </label>
+                            </div>
+
+                            {formErrors.analysisApproach && (
+                                <span className="field-error">
+                                    {formErrors.analysisApproach}
+                                </span>
+                            )}
+                        </fieldset>
+
+                        <div className="optional-fields">
+                            <div className="optional-fields__heading">
+                                <strong>Contexto complementario</strong>
+                                <span>Opcional</span>
+                            </div>
+
+                            <Field
+                                label="Sector o industria"
+                                helpText="Ayuda a contextualizar regulaciones, prioridades y lenguaje comercial."
+                            >
+                                <select
+                                    value={form.sector}
+                                    onChange={(event) =>
+                                        setField("sector", event.target.value)
+                                    }
+                                    disabled={isStreaming}
+                                >
+                                    <option value="">
+                                        Seleccionar sector...
+                                    </option>
+
+                                    {sectorOptions.map((item) => (
+                                        <option
+                                            key={item}
+                                            value={item}
+                                        >
+                                            {item}
+                                        </option>
+                                    ))}
+                                </select>
+                            </Field>
+
+                            <Field
+                                label="Contexto adicional de la oportunidad"
+                                helpText="Incluye restricciones, antecedentes, fechas, requisitos técnicos o información conocida del proceso de compra."
+                            >
+                                <textarea
+                                    value={form.additionalContext}
+                                    onChange={(event) =>
+                                        setField(
+                                            "additionalContext",
+                                            event.target.value
+                                        )
+                                    }
+                                    disabled={isStreaming}
+                                    rows={4}
+                                    placeholder="Ej.: El cliente ya utiliza Microsoft 365, exige residencia de datos y espera una demostración funcional."
+                                />
+                            </Field>
+                        </div>
+
+                        <div
+                            className="upload-box upload-box--pending"
+                            aria-disabled="true"
+                        >
+                            <span
+                                className="upload-box__icon"
+                                aria-hidden="true"
+                            >
+                                +
+                            </span>
+
+                            <strong>
+                                Archivos de referencia
+                            </strong>
+
+                            <span>
+                                PDF, TXT, Markdown, CSV, JSON, HTML, XML o imágenes
+                            </span>
+
+                            <small>
+                                La selección real de archivos se habilitará en el Lote 2B.
+                            </small>
                         </div>
 
                         <button
-                            className="dark-btn generate-btn"
-                            disabled={isStreaming || !canGenerateFromForm}
-                            onClick={generateBattlecardFromForm}
+                            type="button"
+                            className="dark-btn prepare-prompt-button"
+                            disabled={
+                                isStreaming || !canPreparePrompt
+                            }
+                            onClick={prepareBattlecardPrompt}
                         >
-                            {isStreaming && activeMode === "form"
-                                ? "Generando Battlecard..."
-                                : "→ Generar Battlecard"}
+                            Preparar solicitud
+                            <span aria-hidden="true">→</span>
                         </button>
 
-                        {!canGenerateFromForm && (
+                        {!canPreparePrompt && (
                             <p className="form-hint">
-                                Indica al menos el competidor para habilitar la generación directa.
+                                Completa las cinco preguntas obligatorias para preparar la solicitud.
                             </p>
+                        )}
+
+                        {hasPreparedPrompt && (
+                            <div
+                                className="prompt-ready"
+                                role="status"
+                            >
+                                <strong>Solicitud preparada</strong>
+
+                                <span>
+                                    Revisa el contenido en el cuadro del chat y presiona Enviar cuando estés de acuerdo.
+                                </span>
+                            </div>
                         )}
                     </div>
                 </aside>
@@ -506,11 +714,21 @@ Una Battlecard lista para revisión comercial.
 
                     <div className="mode-info">
                         <div>
-                            <strong>Dos formas de trabajar</strong>
+                            <strong>
+                                Conversación libre o solicitud guiada
+                            </strong>
+
                             <p>
-                                Usa el chat para conversar con el agente o completa el formulario para enviar una solicitud estructurada.
+                                Escribe directamente al agente o utiliza el formulario para
+                                preparar una solicitud estructurada y editable.
                             </p>
                         </div>
+
+                        {hasPreparedPrompt && (
+                            <span className="prepared-prompt-badge">
+                                Solicitud preparada
+                            </span>
+                        )}
                     </div>
 
                     <div className="chat-body">
@@ -568,10 +786,6 @@ Una Battlecard lista para revisión comercial.
                                         Enlace no disponible
                                     </button>
                                 )}
-
-                                <button className="secondary-local" onClick={() => onNavigate("detail", 1)}>
-                                    Ver demo de detalle
-                                </button>
                             </div>
 
                             {!result.downloadUrl && (
@@ -587,38 +801,100 @@ Una Battlecard lista para revisión comercial.
                             <button
                                 key={item}
                                 disabled={isStreaming}
-                                onClick={() => setChatInput(item)}
+                                onClick={() => {
+                                    setChatInput(item);
+                                    setHasPreparedPrompt(false);
+                                }}
                             >
                                 {item}
                             </button>
                         ))}
                     </div>
 
-                    <div className="chat-input-row">
-                        <textarea
-                            value={chatInput}
-                            onChange={(event) => setChatInput(event.target.value)}
-                            disabled={isStreaming}
-                            placeholder="Escribe una solicitud libre para Leitner IA..."
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" && !event.shiftKey) {
-                                    event.preventDefault();
-                                    void sendChatMessage();
-                                }
-                            }}
-                        />
+                    <div
+                        className={
+                            hasPreparedPrompt
+                                ? "chat-input-area chat-input-area--prepared"
+                                : "chat-input-area"
+                        }
+                    >
+                        {hasPreparedPrompt && (
+                            <div className="prepared-prompt-notice">
+                                <div>
+                                    <strong>
+                                        Prompt estructurado listo para revisión
+                                    </strong>
 
-                        <div className="input-actions">
-                            {isStreaming ? (
-                                <button className="cancel-btn" onClick={cancelStreaming}>
-                                    Cancelar
+                                    <span>
+                                        Puedes modificar cualquier parte antes de enviarlo.
+                                    </span>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setChatInput("");
+                                        setHasPreparedPrompt(false);
+                                    }}
+                                    disabled={isStreaming}
+                                >
+                                    Descartar
                                 </button>
-                            ) : (
-                                <button className="dark-btn" onClick={sendChatMessage} disabled={!chatInput.trim()}>
-                                    Enviar
-                                </button>
-                            )}
+                            </div>
+                        )}
+
+                        <div className="chat-input-row">
+                            <textarea
+                                value={chatInput}
+                                onChange={(event) => {
+                                    setChatInput(event.target.value);
+
+                                    if (hasPreparedPrompt) {
+                                        setHasPreparedPrompt(true);
+                                    }
+                                }}
+                                disabled={isStreaming}
+                                placeholder="Escribe una solicitud libre para Leitner IA..."
+                                rows={hasPreparedPrompt ? 10 : 3}
+                                onKeyDown={(event) => {
+                                    if (
+                                        event.key === "Enter" &&
+                                        !event.shiftKey &&
+                                        !hasPreparedPrompt
+                                    ) {
+                                        event.preventDefault();
+                                        void sendChatMessage();
+                                    }
+                                }}
+                            />
+
+                            <div className="input-actions">
+                                {isStreaming ? (
+                                    <button
+                                        type="button"
+                                        className="cancel-btn"
+                                        onClick={cancelStreaming}
+                                    >
+                                        Cancelar
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="dark-btn"
+                                        onClick={sendChatMessage}
+                                        disabled={!chatInput.trim()}
+                                    >
+                                        Enviar
+                                    </button>
+                                )}
+                            </div>
                         </div>
+
+                        <small className="chat-input-help">
+                            {hasPreparedPrompt
+                                ? "Revisa la solicitud completa. En este modo debes usar el botón Enviar."
+                                : "Presiona Enter para enviar o Shift + Enter para crear una nueva línea."}
+                        </small>
                     </div>
                 </section>
             </section>
@@ -666,86 +942,388 @@ Una Battlecard lista para revisión comercial.
         }
 
         .agent-layout {
-          display: grid;
-          grid-template-columns: 320px minmax(0, 1fr);
-          gap: 18px;
-          padding-top: 22px;
-          padding-bottom: 40px;
-          align-items: start;
+        display: grid;
+        grid-template-columns: minmax(390px, 440px) minmax(0, 1fr);
+        gap: 22px;
+        padding-top: 22px;
+        padding-bottom: 40px;
+        align-items: start;
         }
 
         .form-panel {
-          overflow: hidden;
-          position: sticky;
-          top: 78px;
+        overflow: hidden;
+        position: sticky;
+        top: 78px;
+        max-height: calc(100vh - 98px);
+        display: flex;
+        flex-direction: column;
         }
 
         .form-head {
-          padding: 20px;
-          background: #123263;
-          color: #fff;
+        flex: 0 0 auto;
+        min-height: 76px;
+        padding: 18px 20px;
+        background: linear-gradient(135deg, #123263, #081f3e);
+        color: #ffffff;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
         }
 
         .form-head strong,
         .form-head small {
-          display: block;
+        display: block;
         }
 
         .form-head strong {
-          font-size: 14px;
+        font-size: 15px;
+        line-height: 1.3;
         }
 
         .form-head small {
-          color: rgba(255,255,255,.62);
-          margin-top: 5px;
-          line-height: 1.45;
+        max-width: 275px;
+        margin-top: 5px;
+        color: rgba(255, 255, 255, 0.66);
+        font-size: 11px;
+        line-height: 1.45;
+        }
+
+        .form-progress {
+        flex: 0 0 auto;
+        border: 1px solid rgba(124, 188, 227, 0.24);
+        border-radius: 999px;
+        padding: 5px 10px;
+        background: rgba(124, 188, 227, 0.1);
+        color: #a7d9f8;
+        font-size: 10px;
+        font-weight: 800;
+        white-space: nowrap;
         }
 
         .form-body {
-          padding: 20px;
-          display: flex;
-          flex-direction: column;
-          gap: 15px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        }
+
+        .form-introduction {
+        border: 1px solid rgba(0, 91, 150, 0.12);
+        border-radius: 10px;
+        padding: 13px 14px;
+        background: #f5f9fd;
+        }
+
+        .form-introduction strong {
+        display: block;
+        color: #123263;
+        font-size: 12px;
+        }
+
+        .form-introduction p {
+        margin: 5px 0 0;
+        color: #64748b;
+        font-size: 11px;
+        line-height: 1.5;
+        }
+
+        .field {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        }
+
+        .field label {
+        color: #123263;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.4;
+        }
+
+        .required-indicator {
+        color: #dc2626;
+        }
+
+        .field-help {
+        margin-top: -3px;
+        color: #718096;
+        font-size: 10px;
+        line-height: 1.45;
+        }
+
+        .field input,
+        .field textarea,
+        .field select {
+        width: 100%;
+        border: 1px solid #d8e2ec;
+        border-radius: 9px;
+        padding: 10px 12px;
+        background: #f8fafc;
+        color: #061226;
+        font-size: 12px;
+        line-height: 1.5;
+        outline: none;
+        transition:
+            border-color 150ms ease,
+            background-color 150ms ease,
+            box-shadow 150ms ease;
+        }
+
+        .field textarea {
+        min-height: 84px;
+        resize: vertical;
+        }
+
+        .field input:focus,
+        .field textarea:focus,
+        .field select:focus {
+        border-color: #7cbce3;
+        background: #ffffff;
+        box-shadow: 0 0 0 3px rgba(124, 188, 227, 0.14);
+        }
+
+        .field input:disabled,
+        .field textarea:disabled,
+        .field select:disabled {
+        cursor: not-allowed;
+        opacity: 0.65;
+        }
+
+        .field--error input,
+        .field--error textarea,
+        .field--error select {
+        border-color: #fca5a5;
+        background: #fffafa;
+        }
+
+        .field-error {
+        color: #b91c1c;
+        font-size: 10px;
+        font-weight: 650;
+        line-height: 1.4;
+        }
+
+        .analysis-fieldset {
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        }
+
+        .analysis-fieldset legend {
+        padding: 0;
+        color: #123263;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.4;
+        }
+
+        .analysis-fieldset legend span {
+        color: #dc2626;
+        }
+
+        .analysis-description {
+        margin: 5px 0 10px;
+        color: #718096;
+        font-size: 10px;
+        line-height: 1.45;
+        }
+
+        .analysis-options {
+        display: grid;
+        gap: 9px;
+        }
+
+        .analysis-option {
+        position: relative;
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        border: 1px solid #d8e2ec;
+        border-radius: 10px;
+        padding: 12px;
+        background: #f8fafc;
+        cursor: pointer;
+        transition:
+            border-color 150ms ease,
+            background-color 150ms ease,
+            box-shadow 150ms ease;
+        }
+
+        .analysis-option:hover {
+        border-color: #aacde5;
+        background: #f4f9fd;
+        }
+
+        .analysis-option--selected {
+        border-color: #337ead;
+        background: #eef7fc;
+        box-shadow: 0 0 0 2px rgba(0, 91, 150, 0.08);
+        }
+
+        .analysis-option input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+        }
+
+        .analysis-option__control {
+        width: 17px;
+        height: 17px;
+        margin-top: 2px;
+        border: 2px solid #94a3b8;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: inset 0 0 0 3px #ffffff;
+        }
+
+        .analysis-option--selected .analysis-option__control {
+        border-color: #005b96;
+        background: #005b96;
+        }
+
+        .analysis-option__content strong {
+        display: block;
+        color: #17263a;
+        font-size: 11px;
+        line-height: 1.4;
+        }
+
+        .analysis-option__content small {
+        display: block;
+        margin-top: 3px;
+        color: #64748b;
+        font-size: 10px;
+        line-height: 1.45;
+        }
+
+        .optional-fields {
+        border-top: 1px solid #e5edf4;
+        padding-top: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        }
+
+        .optional-fields__heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        }
+
+        .optional-fields__heading strong {
+        color: #123263;
+        font-size: 12px;
+        }
+
+        .optional-fields__heading span {
+        border-radius: 999px;
+        padding: 4px 8px;
+        background: #eef2f6;
+        color: #718096;
+        font-size: 9px;
+        font-weight: 800;
+        text-transform: uppercase;
         }
 
         .upload-box {
-          border: 1.5px dashed #dde6ef;
-          border-radius: 10px;
-          background: #f6f9fc;
-          color: #7cbce3;
-          text-align: center;
-          padding: 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          cursor: not-allowed;
-          opacity: .78;
+        border: 1.5px dashed #cbd8e5;
+        border-radius: 11px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        background: #f8fafc;
+        text-align: center;
         }
 
-        .upload-box div {
-          font-size: 17px;
+        .upload-box--pending {
+        opacity: 0.8;
         }
 
-        .upload-box span {
-          color: #53637a;
-          font-size: 12px;
+        .upload-box__icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 9px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #e8f2fa;
+        color: #005b96;
+        font-size: 20px;
+        line-height: 1;
+        }
+
+        .upload-box strong {
+        color: #334155;
+        font-size: 11px;
+        }
+
+        .upload-box > span:not(.upload-box__icon) {
+        color: #64748b;
+        font-size: 10px;
+        line-height: 1.4;
         }
 
         .upload-box small {
-          color: #9aa6b2;
-          font-size: 11px;
-          line-height: 1.35;
+        color: #94a3b8;
+        font-size: 9px;
+        line-height: 1.4;
         }
 
-        .generate-btn {
-          width: 100%;
+        .prepare-prompt-button {
+        width: 100%;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        }
+
+        .prepare-prompt-button span {
+        transition: transform 150ms ease;
+        }
+
+        .prepare-prompt-button:hover span {
+        transform: translateX(3px);
         }
 
         .form-hint {
-          margin: -4px 0 0;
-          color: #8a98a8;
-          font-size: 12px;
-          line-height: 1.35;
+        margin: -10px 0 0;
+        color: #8492a3;
+        font-size: 10px;
+        line-height: 1.45;
+        text-align: center;
+        }
+
+        .prompt-ready {
+        border: 1px solid #bbf7d0;
+        border-radius: 10px;
+        padding: 11px 12px;
+        background: #f0fdf4;
+        }
+
+        .prompt-ready strong,
+        .prompt-ready span {
+        display: block;
+        }
+
+        .prompt-ready strong {
+        color: #166534;
+        font-size: 11px;
+        }
+
+        .prompt-ready span {
+        margin-top: 3px;
+        color: #3f6f4c;
+        font-size: 10px;
+        line-height: 1.45;
         }
 
         .chat-panel {
@@ -813,9 +1391,91 @@ Una Battlecard lista para revisión comercial.
         }
 
         .mode-info {
-          padding: 14px 20px;
-          background: #f8fbfe;
-          border-bottom: 1px solid #dde6ef;
+        padding: 14px 20px;
+        background: #f8fbfe;
+        border-bottom: 1px solid #dde6ef;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        }
+
+        .prepared-prompt-badge {
+        flex: 0 0 auto;
+        border: 1px solid #bbf7d0;
+        border-radius: 999px;
+        padding: 5px 10px;
+        background: #f0fdf4;
+        color: #15803d;
+        font-size: 10px;
+        font-weight: 800;
+        }
+
+        .chat-input-area {
+        border-top: 1px solid #dde6ef;
+        background: #ffffff;
+        }
+
+        .chat-input-area--prepared {
+        background: #fbfefc;
+        }
+
+        .prepared-prompt-notice {
+        margin: 14px 18px 0;
+        border: 1px solid #bbf7d0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: #f0fdf4;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        }
+
+        .prepared-prompt-notice strong,
+        .prepared-prompt-notice span {
+        display: block;
+        }
+
+        .prepared-prompt-notice strong {
+        color: #166534;
+        font-size: 11px;
+        }
+
+        .prepared-prompt-notice span {
+        margin-top: 3px;
+        color: #4b7356;
+        font-size: 10px;
+        }
+
+        .prepared-prompt-notice button {
+        border: 1px solid #bbf7d0;
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: #ffffff;
+        color: #166534;
+        font-size: 10px;
+        font-weight: 800;
+        }
+
+        .chat-input-row {
+        border-top: 0;
+        }
+
+        .chat-input-area--prepared .chat-input-row textarea {
+        min-height: 230px;
+        max-height: 380px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        line-height: 1.65;
+        }
+
+        .chat-input-help {
+        display: block;
+        padding: 0 18px 12px;
+        color: #8a98a8;
+        font-size: 10px;
+        line-height: 1.4;
         }
 
         .mode-info strong {
@@ -1072,6 +1732,10 @@ Una Battlecard lista para revisión comercial.
 
           .form-panel {
             position: static;
+            max-height: none;
+          }
+          .form-body {
+            overflow: visible;
           }
 
           .agent-top-inner {
@@ -1089,6 +1753,26 @@ Una Battlecard lista para revisión comercial.
         }
 
         @media (max-width: 640px) {
+          .form-head {
+            flex-direction: column;
+          }
+          .form-progress {
+            align-self: flex-start;
+          }
+          .mode-info {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+          .prepared-prompt-notice {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+          .chat-input-area--prepared .chat-input-row textarea {
+            min-height: 280px;
+          }
+          .analysis-option {
+            padding: 11px;
+          }
           .chat-head {
             flex-direction: column;
           }
@@ -1113,19 +1797,53 @@ Una Battlecard lista para revisión comercial.
 function Field({
     label,
     required,
+    helpText,
+    error,
     children,
 }: {
     label: string;
     required?: boolean;
+    helpText?: string;
+    error?: string;
     children: ReactNode;
 }) {
     return (
-        <div className="field">
+        <div
+            className={
+                error
+                    ? "field field--error"
+                    : "field"
+            }
+        >
             <label>
                 {label}
-                {required && <span style={{ color: "#ef4444" }}> *</span>}
+
+                {required && (
+                    <span
+                        className="required-indicator"
+                        aria-label="obligatorio"
+                    >
+                        {" "}*
+                    </span>
+                )}
             </label>
+
+            {helpText && (
+                <small className="field-help">
+                    {helpText}
+                </small>
+            )}
+
             {children}
+
+            {error && (
+                <span
+                    className="field-error"
+                    role="alert"
+                >
+                    {error}
+                </span>
+            )}
         </div>
     );
 }

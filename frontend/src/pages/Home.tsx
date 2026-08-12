@@ -173,11 +173,13 @@ export default function Home({ onNavigate }: HomeProps) {
             </p>
 
             <div className="hero-actions">
-              <button className="primary-btn" onClick={() => onNavigate("agent")}>
-                → Probar agente
-              </button>
-              <button className="secondary-btn" onClick={() => onNavigate("battlecards")}>
-                Ver Battlecards recientes
+              <button
+                type="button"
+                className="primary-btn hero-primary-action"
+                onClick={() => onNavigate("agent")}
+              >
+                <span aria-hidden="true">→</span>
+                Probar agente
               </button>
             </div>
 
@@ -208,19 +210,6 @@ export default function Home({ onNavigate }: HomeProps) {
                   <strong>{value}</strong>
                 </div>
               ))}
-
-              <button onClick={() => onNavigate("detail", 1)}>Ver Battlecard completa →</button>
-            </div>
-
-            <div className="hero-kpis">
-              <div className="glass">
-                <strong>7 min</strong>
-                <small>Tiempo promedio de generación</small>
-              </div>
-              <div className="glass">
-                <strong>24</strong>
-                <small>Battlecards generadas</small>
-              </div>
             </div>
           </div>
         </div>
@@ -317,7 +306,7 @@ export default function Home({ onNavigate }: HomeProps) {
               className="dark-btn process-button"
               onClick={() => onNavigate("agent")}
             >
-              Crear mi primera Battlecard
+              Probar Leitner IA
               <span aria-hidden="true">→</span>
             </button>
           </div>
@@ -367,6 +356,13 @@ export default function Home({ onNavigate }: HomeProps) {
           color: #fff;
           display: flex;
           align-items: center;
+        }
+        .hero-primary-action {
+          min-width: 164px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 9px;
         }
 
         .hero-grid {
@@ -419,9 +415,21 @@ export default function Home({ onNavigate }: HomeProps) {
           background: rgba(255,255,255,.05);
         }
 
+        .hero-preview {
+          width: 100%;
+          max-width: 540px;
+          justify-self: end;
+        }
+              
         .preview-card {
           border-radius: 16px;
-          padding: 24px;
+          padding: 26px;
+          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18);
+        }
+              
+        .preview-line:last-child {
+          border-bottom: 0;
+          padding-bottom: 0;
         }
 
         .preview-head {
@@ -468,43 +476,7 @@ export default function Home({ onNavigate }: HomeProps) {
           text-align: right;
           font-size: 13px;
         }
-
-        .preview-card button {
-          width: 100%;
-          margin-top: 18px;
-          padding: 12px;
-          border-radius: 8px;
-          border: 1px solid rgba(0,91,150,.5);
-          background: rgba(0,91,150,.35);
-          color: #7cbce3;
-          font-weight: 800;
-        }
-
-        .hero-kpis {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 14px;
-        }
-
-        .hero-kpis > div {
-          border-radius: 12px;
-          padding: 18px;
-        }
-
-        .hero-kpis strong {
-          display: block;
-          color: #8cc63f;
-          font-size: 28px;
-          font-family: "DM Sans";
-        }
-
-        .hero-kpis small,
-        .demo-note {
-          color: rgba(255,255,255,.42);
-        }
-          
-
+  
         .demo-note {
           margin-top: 14px;
           border: 1px solid rgba(255,255,255,.08);
