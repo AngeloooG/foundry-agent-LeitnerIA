@@ -4,7 +4,6 @@ import { useAuth } from "../hooks/useAuth";
 import { useAgentConsoleState } from "../hooks/useAppState";
 
 import {
-    extractFirstDownloadUrl,
     streamAgentMessage,
     type AgentAnnotation,
 } from "../services/agentStreamClient";
@@ -31,12 +30,6 @@ interface ChatMessage {
     id: string;
     role: MessageRole;
     text: string;
-}
-
-interface BattlecardResult {
-    fileName?: string;
-    downloadUrl?: string;
-    rawText?: string;
 }
 
 const sectorOptions = [
@@ -92,9 +85,6 @@ export default function AgentConsole() {
     );
     const [isStreaming, setIsStreaming] = useState(false);
     const [toolStatus, setToolStatus] = useState<string>("");
-    const [result, setResult] = useState<BattlecardResult | null>(
-        () => agentConsole.result
-    );
     const [annotations, setAnnotations] = useState<AgentAnnotation[]>(
         () => agentConsole.annotations
     );
@@ -119,7 +109,6 @@ export default function AgentConsole() {
             messages,
             chatInput,
             conversationId,
-            result,
             annotations,
             selectedFiles,
             attachmentErrors,
@@ -131,7 +120,6 @@ export default function AgentConsole() {
         messages,
         chatInput,
         conversationId,
-        result,
         annotations,
         selectedFiles,
         attachmentErrors,
@@ -266,7 +254,6 @@ export default function AgentConsole() {
 
     const runAgent = async (
         message: string,
-        mode: "chat" | "form",
         files: File[]
     ) => {
         if (isStreaming) return;
@@ -280,7 +267,6 @@ export default function AgentConsole() {
         setIsStreaming(true);
         setToolStatus("");
         setAnnotations([]);
-        setResult(null);
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
@@ -343,19 +329,6 @@ export default function AgentConsole() {
                 setAttachmentErrors([]);
             }
 
-            const downloadUrlFromText = extractFirstDownloadUrl(streamedText);
-            const downloadUrlFromAnnotation = collectedAnnotations.find((item) => item.url)?.url;
-
-            const downloadUrl = downloadUrlFromText || downloadUrlFromAnnotation;
-
-            if (mode === "form" || downloadUrl) {
-                setResult({
-                    fileName: buildSuggestedFileName(),
-                    downloadUrl: downloadUrl || undefined,
-                    rawText: streamedText,
-                });
-            }
-
             if (!streamedText.trim()) {
                 updateMessage(
                     assistantMessageId,
@@ -389,7 +362,6 @@ export default function AgentConsole() {
             return;
         }
 
-        const mode = hasPreparedPrompt ? "form" : "chat";
         const filesToSend = [...selectedFiles];
 
         setChatInput("");
@@ -397,7 +369,7 @@ export default function AgentConsole() {
 
         addMessage("user", text);
 
-        await runAgent(text, mode, filesToSend);
+        await runAgent(text, filesToSend);
     };
 
     const cancelStreaming = () => {
@@ -449,7 +421,6 @@ export default function AgentConsole() {
         ]);
         setChatInput("");
         setToolStatus("");
-        setResult(null);
         setAnnotations([]);
         setHasPreparedPrompt(false);
         setFormErrors({});
@@ -458,31 +429,6 @@ export default function AgentConsole() {
         setIsDraggingFiles(false);
         setForm({ ...initialBattlecardForm });
     };
-
-    const buildSuggestedFileName = () => {
-        const company = form.company.trim() || "CONSEIN";
-
-        const competitorSummary =
-            form.competitors
-                .split(/[,;\n]/)
-                .map((item) => item.trim())
-                .find(Boolean) || "Competencia";
-
-        const sanitizedCompany = company.replace(
-            /[^\wáéíóúÁÉÍÓÚñÑ-]+/g,
-            "_"
-        );
-
-        const sanitizedCompetitor = competitorSummary.replace(
-            /[^\wáéíóúÁÉÍÓÚñÑ-]+/g,
-            "_"
-        );
-
-        return `Battlecard_${sanitizedCompany}_vs_${sanitizedCompetitor}_${new Date()
-            .toISOString()
-            .slice(0, 10)}.docx`;
-    };
-
     return (
         <main className="app-shell agent-page">
             <section className="agent-top">
@@ -949,8 +895,11 @@ export default function AgentConsole() {
 
                     <div className="chat-body">
                         {messages.map((message) => (
-                            <div key={message.id} className={`msg ${message.role}`}>
-                                {message.text}
+                            <div
+                                key={message.id}
+                                className={`msg ${message.role}`}
+                            >
+                                <MessageContent text={message.text} />
                             </div>
                         ))}
 
@@ -988,33 +937,6 @@ export default function AgentConsole() {
                                     </span>
                                 ))}
                             </div>
-                        </div>
-                    )}
-
-                    {result && (
-                        <div className="result-box">
-                            <div>
-                                <strong>Resultado de Battlecard</strong>
-                                <p>{result.fileName || "Battlecard generada por Leitner IA"}</p>
-                            </div>
-
-                            <div className="result-actions">
-                                {result.downloadUrl ? (
-                                    <a className="primary-btn result-link" href={result.downloadUrl} target="_blank" rel="noreferrer">
-                                        Descargar Battlecard
-                                    </a>
-                                ) : (
-                                    <button className="primary-btn" disabled>
-                                        Enlace no disponible
-                                    </button>
-                                )}
-                            </div>
-
-                            {!result.downloadUrl && (
-                                <small>
-                                    El agente respondió, pero no devolvió URL de descarga. Si esperas documento final, valida que la herramienta MCP o Power Automate devuelva explícitamente el enlace.
-                                </small>
-                            )}
                         </div>
                     )}
 
@@ -1690,6 +1612,7 @@ export default function AgentConsole() {
         }
 
         .chat-panel {
+          min-width: 0;
           overflow: hidden;
           display: flex;
           flex-direction: column;
@@ -1855,23 +1778,34 @@ export default function AgentConsole() {
         }
 
         .chat-body {
+          min-width: 0;
           flex: 1;
           padding: 18px;
           display: flex;
           flex-direction: column;
           gap: 12px;
-          overflow: auto;
+          overflow-y: auto;
+          overflow-x: hidden;
           min-height: 360px;
           max-height: calc(100vh - 390px);
         }
 
         .msg {
+          min-width: 0;
           max-width: 84%;
           padding: 12px 14px;
           border-radius: 14px;
           font-size: 13px;
           line-height: 1.65;
           white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .msg span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .msg.agent {
@@ -1895,6 +1829,40 @@ export default function AgentConsole() {
           border: 1px solid #fed7aa;
           color: #9a3412;
           max-width: 92%;
+        }
+
+        .message-link {
+          display: inline-flex;
+          align-items: center;
+          max-width: 100%;
+          box-sizing: border-box;
+          margin: 4px 2px;
+          border: 1px solid rgba(0, 91, 150, 0.22);
+          border-radius: 8px;
+          padding: 7px 11px;
+          background: #eaf4fb;
+          color: #005b96;
+          font-weight: 800;
+          line-height: 1.35;
+          text-decoration: none;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          transition:
+            background-color 150ms ease,
+            border-color 150ms ease,
+            color 150ms ease;
+        }
+
+        .message-link:hover {
+          border-color: #7cbce3;
+          background: #dceefa;
+          color: #123263;
+          text-decoration: underline;
+        }
+
+        .message-link:focus-visible {
+          outline: 3px solid rgba(124, 188, 227, 0.35);
+          outline-offset: 2px;
         }
 
         .tool-status {
@@ -1971,46 +1939,6 @@ export default function AgentConsole() {
           font-size: 11px;
           color: #53637a;
           background: #fff;
-        }
-
-        .result-box {
-          margin: 0 18px 14px;
-          border-radius: 12px;
-          border: 1px solid #dde6ef;
-          padding: 16px;
-          background: #f8fbfe;
-        }
-
-        .result-box strong {
-          display: block;
-          font-size: 14px;
-        }
-
-        .result-box p {
-          color: #53637a;
-          font-family: "JetBrains Mono";
-          font-size: 12px;
-          margin: 6px 0 14px;
-          word-break: break-word;
-        }
-
-        .result-box small {
-          display: block;
-          margin-top: 10px;
-          color: #8a98a8;
-          line-height: 1.45;
-        }
-
-        .result-actions {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .result-link {
-          text-decoration: none;
-          display: inline-flex;
-          align-items: center;
         }
 
         .quick-row {
@@ -2107,11 +2035,12 @@ export default function AgentConsole() {
           }
 
           .chat-panel {
-            min-height: 620px;
+            min-width: 0;
           }
 
           .chat-body {
-            max-height: none;
+            min-width: 0;
+            overflow-x: hidden;
           }
         }
 
@@ -2158,13 +2087,65 @@ export default function AgentConsole() {
             grid-template-columns: 32px minmax(0, 1fr) 28px;
           }
 
-          .msg {
-            max-width: 94%;
-          }
         }
       `}</style>
         </main>
     );
+}
+
+function MessageContent({
+    text,
+}: {
+    text: string;
+}) {
+    const urlPattern = /(https?:\/\/[^\s<>"']+)/gi;
+    const parts = text.split(urlPattern);
+
+    return (
+        <>
+            {parts.map((part, index) => {
+                const isUrl = /^https?:\/\/[^\s<>"']+$/i.test(part);
+
+                if (!isUrl) {
+                    return (
+                        <span key={`text-${index}`}>
+                            {part}
+                        </span>
+                    );
+                }
+
+                const { url, trailingPunctuation } =
+                    separateTrailingUrlPunctuation(part);
+
+                return (
+                    <span key={`url-${index}`}>
+                        <a
+                            className="message-link"
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir archivo generado en una pestaña nueva"
+                        >
+                            Abrir archivo generado
+                        </a>
+                        {trailingPunctuation}
+                    </span>
+                );
+            })}
+        </>
+    );
+}
+
+function separateTrailingUrlPunctuation(value: string): {
+    url: string;
+    trailingPunctuation: string;
+} {
+    const match = value.match(/^(.*?)([.,;:!?]+)?$/);
+
+    return {
+        url: match?.[1] || value,
+        trailingPunctuation: match?.[2] || "",
+    };
 }
 
 function formatFileSize(bytes: number): string {
