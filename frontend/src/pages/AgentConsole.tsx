@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { useAuth } from "../hooks/useAuth";
+import { useAgentConsoleState } from "../hooks/useAppState";
 
 import {
     extractFirstDownloadUrl,
@@ -62,40 +63,80 @@ function createId() {
 
 export default function AgentConsole() {
     const { getAccessToken } = useAuth();
+    const {
+        agentConsole,
+        patchAgentConsole,
+        resetAgentConsole,
+    } = useAgentConsoleState();
 
+    /*
+     * Se hidrata desde AppContext y se conserva localmente durante el montaje.
+     * Esto mantiene seguras las actualizaciones funcionales frecuentes del
+     * streaming y sincroniza la sesión cuando el usuario cambia de ruta.
+     */
     const [form, setForm] = useState<BattlecardForm>(
-        initialBattlecardForm
+        () => agentConsole.form
     );
-
     const [formErrors, setFormErrors] =
-        useState<BattlecardFormErrors>({});
-
+        useState<BattlecardFormErrors>(() => agentConsole.formErrors);
     const [hasPreparedPrompt, setHasPreparedPrompt] =
-        useState(false);
-
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        {
-            id: createId(),
-            role: "agent",
-            text:
-                "Hola, soy Leitner IA. Puedes conversar conmigo libremente o completar el formulario para preparar una solicitud estructurada. El formulario no enviará nada automáticamente: podrás revisar y editar la solicitud antes de enviarla.",
-        },
-    ]);
-
-    const [chatInput, setChatInput] = useState("");
-    const [conversationId, setConversationId] = useState<string | null>(null);
+        useState(() => agentConsole.hasPreparedPrompt);
+    const [messages, setMessages] = useState<ChatMessage[]>(
+        () => agentConsole.messages
+    );
+    const [chatInput, setChatInput] = useState(
+        () => agentConsole.chatInput
+    );
+    const [conversationId, setConversationId] = useState<string | null>(
+        () => agentConsole.conversationId
+    );
     const [isStreaming, setIsStreaming] = useState(false);
     const [toolStatus, setToolStatus] = useState<string>("");
-    const [result, setResult] = useState<BattlecardResult | null>(null);
-    const [annotations, setAnnotations] = useState<AgentAnnotation[]>([]);
+    const [result, setResult] = useState<BattlecardResult | null>(
+        () => agentConsole.result
+    );
+    const [annotations, setAnnotations] = useState<AgentAnnotation[]>(
+        () => agentConsole.annotations
+    );
 
     const chatEndRef = useRef<HTMLDivElement | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
-    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-    const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
+    const [selectedFiles, setSelectedFiles] = useState<File[]>(
+        () => agentConsole.selectedFiles
+    );
+    const [attachmentErrors, setAttachmentErrors] = useState<string[]>(
+        () => agentConsole.attachmentErrors
+    );
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
+
+    useEffect(() => {
+        patchAgentConsole({
+            form,
+            formErrors,
+            hasPreparedPrompt,
+            messages,
+            chatInput,
+            conversationId,
+            result,
+            annotations,
+            selectedFiles,
+            attachmentErrors,
+        });
+    }, [
+        form,
+        formErrors,
+        hasPreparedPrompt,
+        messages,
+        chatInput,
+        conversationId,
+        result,
+        annotations,
+        selectedFiles,
+        attachmentErrors,
+        patchAgentConsole,
+    ]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -396,6 +437,7 @@ export default function AgentConsole() {
 
     const resetConversation = () => {
         abortControllerRef.current?.abort();
+        resetAgentConsole();
         setConversationId(null);
         setMessages([
             {
@@ -414,6 +456,7 @@ export default function AgentConsole() {
         setSelectedFiles([]);
         setAttachmentErrors([]);
         setIsDraggingFiles(false);
+        setForm({ ...initialBattlecardForm });
     };
 
     const buildSuggestedFileName = () => {

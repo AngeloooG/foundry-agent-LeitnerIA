@@ -1,4 +1,8 @@
-import type { AppState, AppAction } from '../types/appState';
+import {
+  initialAgentConsoleState,
+  type AppAction,
+  type AppState,
+} from "../types/appState";
 
 /**
  * Main application state reducer.
@@ -118,19 +122,19 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       const messageIndex = state.chat.messages.findIndex(
         msg => msg.id === action.messageId
       );
-      
+
       if (messageIndex === -1) {
         // Message not found - return unchanged state
         return state;
       }
-      
+
       // Create new array with updated message
       const updatedMessages = [...state.chat.messages];
       updatedMessages[messageIndex] = {
         ...updatedMessages[messageIndex],
         content: updatedMessages[messageIndex].content + action.content,
       };
-      
+
       return {
         ...state,
         chat: {
@@ -145,18 +149,18 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       const messageIndex = state.chat.messages.findIndex(
         msg => msg.id === action.messageId
       );
-      
+
       if (messageIndex === -1) {
         return state;
       }
-      
+
       const updatedMessages = [...state.chat.messages];
       const existingAnnotations = updatedMessages[messageIndex].annotations || [];
       updatedMessages[messageIndex] = {
         ...updatedMessages[messageIndex],
         annotations: [...existingAnnotations, ...action.annotations],
       };
-      
+
       return {
         ...state,
         chat: {
@@ -202,7 +206,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           previousResponseId: action.previousResponseId || '',
         },
       };
-      
+
       return {
         ...state,
         chat: {
@@ -236,16 +240,16 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       const updatedMessages = state.chat.messages.map(msg =>
         msg.id === state.chat.streamingMessageId
           ? {
-              ...msg,
-              more: {
-                ...msg.more,
-                usage: action.usage,
-              },
-              duration: action.usage.duration,
-              retryAttempt: undefined,
-              maxRetries: undefined,
-              activeToolUse: undefined,
-            }
+            ...msg,
+            more: {
+              ...msg.more,
+              usage: action.usage,
+            },
+            duration: action.usage.duration,
+            retryAttempt: undefined,
+            maxRetries: undefined,
+            activeToolUse: undefined,
+          }
           : msg
       );
 
@@ -494,7 +498,37 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           regenerateText: undefined,
         },
       };
+    // === Leitner Agent Console Actions ===
 
+    case "AGENT_CONSOLE_PATCH":
+      return {
+        ...state,
+        agentConsole: {
+          ...state.agentConsole,
+          ...action.payload,
+        },
+      };
+
+    case "AGENT_CONSOLE_RESET":
+      return {
+        ...state,
+        agentConsole: {
+          ...initialAgentConsoleState,
+          form: {
+            ...initialAgentConsoleState.form,
+          },
+          formErrors: {},
+          messages:
+            initialAgentConsoleState.messages.map(
+              (message) => ({
+                ...message,
+              })
+            ),
+          annotations: [],
+          selectedFiles: [],
+          attachmentErrors: [],
+        },
+      };
     // === Conversation History Actions ===
     case 'CONVERSATIONS_LOADING':
       return {

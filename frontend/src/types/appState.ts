@@ -1,6 +1,27 @@
-import type { AccountInfo } from '@azure/msal-browser';
-import type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment } from './chat';
-import type { AppError } from './errors';
+import type {
+  AccountInfo,
+} from "@azure/msal-browser";
+
+import type {
+  IAnnotation,
+  IChatItem,
+  IFileAttachment,
+  IMcpApprovalRequest,
+  IUsageInfo,
+} from "./chat";
+
+import type {
+  AppError,
+} from "./errors";
+
+import type {
+  AgentConsolePatch,
+  AgentConsoleState,
+} from "./agentConsoleState";
+
+import {
+  initialBattlecardForm,
+} from "../pages/agentConsoleForm";
 
 // Re-export types for convenience
 export type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment };
@@ -27,7 +48,7 @@ export interface AppState {
     user: AccountInfo | null;
     error: string | null;
   };
-  
+
   // Chat operations state
   chat: {
     status: 'idle' | 'sending' | 'streaming' | 'error';
@@ -42,6 +63,14 @@ export interface AppState {
     pendingMessages: Array<{ text: string; files?: File[] }>;
   };
 
+  /**
+   * Estado de la consola personalizada de Leitner IA.
+   *
+   * Este estado permanece disponible mientras AppProvider siga montado,
+   * incluso si el usuario navega entre "/" y "/agente".
+   */
+  agentConsole: AgentConsoleState;
+
   // Conversation history state
   conversations: {
     list: ConversationSummary[];
@@ -49,7 +78,7 @@ export interface AppState {
     sidebarOpen: boolean;
     hasMore: boolean;
   };
-  
+
   // UI coordination state
   ui: {
     chatInputEnabled: boolean; // Disable during streaming/errors
@@ -60,11 +89,11 @@ export interface AppState {
  * All possible actions that can modify application state
  * Use discriminated unions for type safety
  */
-export type AppAction = 
+export type AppAction =
   // Auth actions
   | { type: 'AUTH_INITIALIZED'; user: AccountInfo }
   | { type: 'AUTH_TOKEN_EXPIRED' }
-  
+
   // Chat actions
   | { type: 'CHAT_SEND_MESSAGE'; message: IChatItem }
   | { type: 'CHAT_LOAD_MESSAGES'; messages: IChatItem[] }
@@ -92,6 +121,15 @@ export type AppAction =
   | { type: 'CHAT_CANCEL_EDIT' }
   | { type: 'CHAT_CONSUMED_REGENERATE' }
 
+  // Agent console actions
+  | {
+    type: "AGENT_CONSOLE_PATCH";
+    payload: AgentConsolePatch;
+  }
+  | {
+    type: "AGENT_CONSOLE_RESET";
+  }
+
   // Conversation history actions
   | { type: 'CONVERSATIONS_SET_LIST'; conversations: ConversationSummary[]; hasMore: boolean; append?: boolean }
   | { type: 'CONVERSATIONS_LOADING' }
@@ -99,6 +137,28 @@ export type AppAction =
   | { type: 'CONVERSATIONS_TOGGLE_SIDEBAR' }
   | { type: 'CONVERSATIONS_REMOVE'; conversationId: string };
 
+
+export const initialAgentConsoleState: AgentConsoleState = {
+  messages: [
+    {
+      id: "leitner-initial-message",
+      role: "agent",
+      text:
+        "Hola, soy Leitner IA. Puedes conversar conmigo libremente o completar el formulario para preparar una solicitud estructurada. El formulario no enviará nada automáticamente: podrás revisar y editar la solicitud antes de enviarla.",
+    },
+  ],
+  conversationId: null,
+  form: {
+    ...initialBattlecardForm,
+  },
+  formErrors: {},
+  chatInput: "",
+  hasPreparedPrompt: false,
+  annotations: [],
+  result: null,
+  selectedFiles: [],
+  attachmentErrors: [],
+};
 /**
  * Initial state for the application
  */
@@ -119,6 +179,18 @@ export const initialAppState: AppState = {
     editSnapshot: undefined,
     regenerateText: undefined,
     pendingMessages: [],
+  },
+  agentConsole: {
+    ...initialAgentConsoleState,
+    form: {
+      ...initialAgentConsoleState.form,
+    },
+    messages:
+      initialAgentConsoleState.messages.map(
+        (message) => ({
+          ...message,
+        })
+      ),
   },
   conversations: {
     list: [],
