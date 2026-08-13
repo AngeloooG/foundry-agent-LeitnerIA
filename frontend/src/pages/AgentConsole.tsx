@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAuth } from "../hooks/useAuth";
 import { useAgentConsoleState } from "../hooks/useAppState";
 
@@ -899,7 +901,7 @@ export default function AgentConsole() {
                                 key={message.id}
                                 className={`msg ${message.role}`}
                             >
-                                <MessageContent text={message.text} />
+                                <MarkdownMessage content={message.text} />
                             </div>
                         ))}
 
@@ -1797,7 +1799,7 @@ export default function AgentConsole() {
           border-radius: 14px;
           font-size: 13px;
           line-height: 1.65;
-          white-space: pre-wrap;
+          white-space: normal;
           overflow-wrap: anywhere;
           word-break: break-word;
         }
@@ -1829,6 +1831,243 @@ export default function AgentConsole() {
           border: 1px solid #fed7aa;
           color: #9a3412;
           max-width: 92%;
+        }
+
+        .markdown-message {
+          min-width: 0;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .markdown-message > :first-child {
+          margin-top: 0;
+        }
+
+        .markdown-message > :last-child {
+          margin-bottom: 0;
+        }
+
+        .markdown-message p {
+          margin: 0 0 10px;
+          line-height: 1.7;
+        }
+
+        .markdown-message h1,
+        .markdown-message h2,
+        .markdown-message h3,
+        .markdown-message h4 {
+          color: #17263a;
+          line-height: 1.25;
+          letter-spacing: -0.015em;
+          text-wrap: balance;
+        }
+
+        .markdown-message h1 {
+          margin: 22px 0 12px;
+          font-size: 23px;
+        }
+
+        .markdown-message h2 {
+          margin: 20px 0 11px;
+          padding-bottom: 7px;
+          border-bottom: 1px solid #dce6ef;
+          font-size: 20px;
+        }
+
+        .markdown-message h3 {
+          margin: 18px 0 9px;
+          font-size: 17px;
+        }
+
+        .markdown-message h4 {
+          margin: 16px 0 8px;
+          font-size: 15px;
+        }
+
+        .markdown-message ul,
+        .markdown-message ol {
+          margin: 8px 0 12px;
+          padding-left: 24px;
+        }
+
+        .markdown-message li {
+          margin: 5px 0;
+          line-height: 1.65;
+        }
+
+        .markdown-message blockquote {
+          margin: 12px 0;
+          border-left: 4px solid #7cbce3;
+          border-radius: 0 8px 8px 0;
+          padding: 10px 14px;
+          background: #edf6fc;
+          color: #3f5268;
+        }
+
+        .markdown-message blockquote p {
+          margin: 0;
+        }
+
+        .markdown-message code {
+          border-radius: 5px;
+          padding: 2px 5px;
+          background: #e9eff5;
+          color: #123263;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 0.9em;
+        }
+
+        .markdown-message pre {
+          max-width: 100%;
+          margin: 12px 0;
+          overflow-x: auto;
+          border-radius: 10px;
+          padding: 14px;
+          background: #081527;
+          color: #eaf4fb;
+        }
+
+        .markdown-message pre code {
+          padding: 0;
+          background: transparent;
+          color: inherit;
+        }
+
+        .markdown-message hr {
+          margin: 18px 0;
+          border: 0;
+          border-top: 1px solid #dce6ef;
+        }
+
+        .markdown-message strong {
+          color: #17263a;
+          font-weight: 800;
+        }
+
+        .markdown-message em {
+          color: #475569;
+        }
+
+        .markdown-message a:not(.message-link--generated-file) {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .markdown-message input[type="checkbox"] {
+          margin-right: 7px;
+          accent-color: #005b96;
+        }
+
+        .markdown-table-block {
+          min-width: 0;
+          max-width: 100%;
+          margin: 14px 0 18px;
+        }
+
+        .markdown-table-hint {
+          display: none;
+          margin-top: 6px;
+          color: #718096;
+          font-size: 10px;
+          line-height: 1.4;
+        }
+
+        .markdown-table-container {
+          width: 100%;
+          max-width: 100%;
+          margin: 0;
+          overflow-x: auto;
+          overscroll-behavior-inline: contain;
+          border: 1px solid #cfdbe6;
+          border-radius: 12px;
+          background: #ffffff;
+          box-shadow: 0 3px 12px rgba(18, 50, 99, 0.06);
+          scrollbar-width: thin;
+          scrollbar-color: #9aabba #eef3f7;
+        }
+
+        .markdown-table-container:focus-visible {
+          outline: 3px solid rgba(124, 188, 227, 0.38);
+          outline-offset: 2px;
+        }
+
+        .markdown-table {
+          width: max-content;
+          min-width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+          color: #334155;
+          font-size: 12px;
+          line-height: 1.5;
+          white-space: normal;
+        }
+
+        .markdown-table th,
+        .markdown-table td {
+          min-width: 150px;
+          max-width: 300px;
+          padding: 11px 13px;
+          vertical-align: top;
+          border-right: 1px solid #dce6ef;
+          border-bottom: 1px solid #dce6ef;
+          overflow-wrap: anywhere;
+          word-break: normal;
+        }
+
+        .markdown-table th:first-child,
+        .markdown-table td:first-child {
+          min-width: 170px;
+          font-weight: 750;
+        }
+
+        .markdown-table tbody td:first-child {
+          position: sticky;
+          left: 0;
+          z-index: 1;
+          background: #ffffff;
+          box-shadow: 1px 0 0 #dce6ef;
+        }
+
+        .markdown-table tbody tr:nth-child(even) td:first-child {
+          background: #f6f9fc;
+        }
+
+        .markdown-table tbody tr:hover td:first-child {
+          background: #edf6fc;
+        }
+
+        .markdown-table th {
+          position: sticky;
+          top: 0;
+          z-index: 1;
+          background: #123263;
+          color: #ffffff;
+          font-weight: 800;
+          text-align: left;
+        }
+
+        .markdown-table th:first-child {
+          left: 0;
+          z-index: 3;
+          box-shadow: 1px 0 0 rgba(255, 255, 255, 0.18);
+        }
+
+        .markdown-table tbody tr:nth-child(even) td {
+          background: #f6f9fc;
+        }
+
+        .markdown-table tbody tr:hover td {
+          background: #edf6fc;
+        }
+
+        .markdown-table th:last-child,
+        .markdown-table td:last-child {
+          border-right: 0;
+        }
+
+        .markdown-table tbody tr:last-child td {
+          border-bottom: 0;
         }
 
         .message-link--generated-file {
@@ -1884,6 +2123,19 @@ export default function AgentConsole() {
           border-radius: 3px;
           outline: 3px solid rgba(124, 188, 227, 0.35);
           outline-offset: 2px;
+        }
+
+
+        .msg.user .markdown-message h1,
+        .msg.user .markdown-message h2,
+        .msg.user .markdown-message h3,
+        .msg.user .markdown-message h4 {
+          color: #ffffff;
+          border-bottom-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .msg.user .message-inline-link {
+          color: #d9f0ff;
         }
 
         .tool-status {
@@ -2083,6 +2335,38 @@ export default function AgentConsole() {
           .chat-input-area--prepared .chat-input-row textarea {
             min-height: 280px;
           }
+          .markdown-table-hint {
+            display: block;
+          }
+
+          .markdown-table {
+            font-size: 11px;
+          }
+
+          .markdown-table th,
+          .markdown-table td {
+            min-width: 132px;
+            max-width: 250px;
+            padding: 9px 10px;
+          }
+
+          .markdown-table th:first-child,
+          .markdown-table td:first-child {
+            min-width: 145px;
+          }
+
+          .markdown-message h1 {
+            font-size: 20px;
+          }
+
+          .markdown-message h2 {
+            font-size: 18px;
+          }
+
+          .markdown-message h3 {
+            font-size: 16px;
+          }
+
           .analysis-option {
             padding: 11px;
           }
@@ -2114,64 +2398,78 @@ export default function AgentConsole() {
     );
 }
 
-function MessageContent({
-    text,
+function MarkdownMessage({
+    content,
 }: {
-    text: string;
+    content: string;
 }) {
-    const urlPattern = /(https?:\/\/[^\s<>"']+)/gi;
-    const parts = text.split(urlPattern);
-
     return (
-        <>
-            {parts.map((part, index) => {
-                const isUrl = /^https?:\/\/[^\s<>"']+$/i.test(part);
+        <div className="markdown-message">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    a({ href, children }) {
+                        if (!href) {
+                            return <>{children}</>;
+                        }
 
-                if (!isUrl) {
-                    return (
-                        <span key={`text-${index}`}>
-                            {part}
-                        </span>
-                    );
-                }
+                        const isGeneratedSharePointFile =
+                            isConseinSharePointUrl(href);
 
-                const { url, trailingPunctuation } =
-                    separateTrailingUrlPunctuation(part);
-                const isGeneratedSharePointFile =
-                    isConseinSharePointUrl(url);
-
-                return (
-                    <span key={`url-${index}`}>
-                        <a
-                            className={
-                                isGeneratedSharePointFile
-                                    ? "message-link message-link--generated-file"
-                                    : "message-inline-link"
-                            }
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={
-                                isGeneratedSharePointFile
-                                    ? "Abrir archivo generado en SharePoint"
-                                    : url
-                            }
-                        >
-                            {isGeneratedSharePointFile
-                                ? "Abrir archivo generado"
-                                : url}
-                        </a>
-                        {trailingPunctuation}
-                    </span>
-                );
-            })}
-        </>
+                        return (
+                            <a
+                                className={
+                                    isGeneratedSharePointFile
+                                        ? "message-link message-link--generated-file"
+                                        : "message-inline-link"
+                                }
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={
+                                    isGeneratedSharePointFile
+                                        ? "Abrir archivo generado en SharePoint"
+                                        : href
+                                }
+                            >
+                                {isGeneratedSharePointFile
+                                    ? "Abrir archivo generado"
+                                    : children}
+                            </a>
+                        );
+                    },
+                    table({ children }) {
+                        return (
+                            <div className="markdown-table-block">
+                                <div
+                                    className="markdown-table-container"
+                                    role="region"
+                                    aria-label="Tabla de comparación desplazable"
+                                    tabIndex={0}
+                                >
+                                    <table className="markdown-table">
+                                        {children}
+                                    </table>
+                                </div>
+                                <small className="markdown-table-hint">
+                                    Desliza horizontalmente para ver todas las columnas.
+                                </small>
+                            </div>
+                        );
+                    },
+                }}
+            >
+                {content}
+            </ReactMarkdown>
+        </div>
     );
 }
+
 
 function isConseinSharePointUrl(value: string): boolean {
     try {
         const parsedUrl = new URL(value);
+
         return (
             parsedUrl.protocol === "https:" &&
             parsedUrl.hostname.toLowerCase() ===
@@ -2180,18 +2478,6 @@ function isConseinSharePointUrl(value: string): boolean {
     } catch {
         return false;
     }
-}
-
-function separateTrailingUrlPunctuation(value: string): {
-    url: string;
-    trailingPunctuation: string;
-} {
-    const match = value.match(/^(.*?)([.,;:!?]+)?$/);
-
-    return {
-        url: match?.[1] || value,
-        trailingPunctuation: match?.[2] || "",
-    };
 }
 
 function formatFileSize(bytes: number): string {
