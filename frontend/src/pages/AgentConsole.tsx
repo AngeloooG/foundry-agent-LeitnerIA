@@ -1831,7 +1831,7 @@ export default function AgentConsole() {
           max-width: 92%;
         }
 
-        .message-link {
+        .message-link--generated-file {
           display: inline-flex;
           align-items: center;
           max-width: 100%;
@@ -1853,14 +1853,35 @@ export default function AgentConsole() {
             color 150ms ease;
         }
 
-        .message-link:hover {
+        .message-link--generated-file:hover {
           border-color: #7cbce3;
           background: #dceefa;
           color: #123263;
           text-decoration: underline;
         }
 
-        .message-link:focus-visible {
+        .message-link--generated-file:focus-visible {
+          outline: 3px solid rgba(124, 188, 227, 0.35);
+          outline-offset: 2px;
+        }
+
+
+        .message-inline-link {
+          color: #005b96;
+          font-weight: 650;
+          text-decoration: underline;
+          text-decoration-thickness: 1px;
+          text-underline-offset: 2px;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .message-inline-link:hover {
+          color: #123263;
+        }
+
+        .message-inline-link:focus-visible {
+          border-radius: 3px;
           outline: 3px solid rgba(124, 188, 227, 0.35);
           outline-offset: 2px;
         }
@@ -2116,17 +2137,29 @@ function MessageContent({
 
                 const { url, trailingPunctuation } =
                     separateTrailingUrlPunctuation(part);
+                const isGeneratedSharePointFile =
+                    isConseinSharePointUrl(url);
 
                 return (
                     <span key={`url-${index}`}>
                         <a
-                            className="message-link"
+                            className={
+                                isGeneratedSharePointFile
+                                    ? "message-link message-link--generated-file"
+                                    : "message-inline-link"
+                            }
                             href={url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="Abrir archivo generado en una pestaña nueva"
+                            title={
+                                isGeneratedSharePointFile
+                                    ? "Abrir archivo generado en SharePoint"
+                                    : url
+                            }
                         >
-                            Abrir archivo generado
+                            {isGeneratedSharePointFile
+                                ? "Abrir archivo generado"
+                                : url}
                         </a>
                         {trailingPunctuation}
                     </span>
@@ -2134,6 +2167,19 @@ function MessageContent({
             })}
         </>
     );
+}
+
+function isConseinSharePointUrl(value: string): boolean {
+    try {
+        const parsedUrl = new URL(value);
+        return (
+            parsedUrl.protocol === "https:" &&
+            parsedUrl.hostname.toLowerCase() ===
+            "conseincloud.sharepoint.com"
+        );
+    } catch {
+        return false;
+    }
 }
 
 function separateTrailingUrlPunctuation(value: string): {
