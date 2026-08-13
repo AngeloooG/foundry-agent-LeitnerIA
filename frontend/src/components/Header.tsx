@@ -1,40 +1,25 @@
-import { useState } from "react";
-import type { Page } from "../App";
+import { useEffect, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router";
 
-interface HeaderProps {
-  currentPage: Page;
-  onNavigate: (page: Page) => void;
-}
+const navItems = [
+  { to: "/", label: "Inicio", end: true },
+  { to: "/agente", label: "Probar agente", end: false },
+] as const;
 
-const navItems: Array<{ id: Page; label: string }> = [
-  {
-    id: "home",
-    label: "Inicio",
-  },
-  {
-    id: "agent",
-    label: "Probar agente",
-  },
-];
-
-export default function Header({
-  currentPage,
-  onNavigate,
-}: HeaderProps) {
+export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
 
-  const handleNavigate = (page: Page) => {
-    onNavigate(page);
+  useEffect(() => {
     setMenuOpen(false);
-  };
+  }, [location.pathname]);
 
   return (
     <header className="site-header">
       <div className="site-header__container">
-        <button
-          type="button"
+        <Link
           className="site-brand"
-          onClick={() => handleNavigate("home")}
+          to="/"
           aria-label="Ir al inicio"
         >
           <span className="site-brand__mark" aria-hidden="true">
@@ -64,22 +49,22 @@ export default function Header({
             <strong>CONSEIN</strong>
             <small>Leitner IA</small>
           </span>
-        </button>
+        </Link>
 
         <nav className="desktop-navigation" aria-label="Navegación principal">
           {navItems.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className={
-                currentPage === item.id
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                isActive
                   ? "navigation-link navigation-link--active"
                   : "navigation-link"
               }
-              onClick={() => handleNavigate(item.id)}
             >
               {item.label}
-            </button>
+            </NavLink>
           ))}
         </nav>
 
@@ -120,18 +105,18 @@ export default function Header({
           aria-label="Navegación móvil"
         >
           {navItems.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className={
-                currentPage === item.id
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                isActive
                   ? "mobile-navigation__link mobile-navigation__link--active"
                   : "mobile-navigation__link"
               }
-              onClick={() => handleNavigate(item.id)}
             >
               {item.label}
-            </button>
+            </NavLink>
           ))}
         </nav>
       )}
@@ -167,6 +152,7 @@ export default function Header({
           border: 0;
           background: transparent;
           color: #ffffff;
+          text-decoration: none;
         }
 
         .site-brand__mark {
@@ -216,6 +202,7 @@ export default function Header({
           color: rgba(255, 255, 255, 0.72);
           font-size: 13px;
           font-weight: 650;
+          text-decoration: none;
           transition:
             color 160ms ease,
             background-color 160ms ease;
@@ -285,6 +272,7 @@ export default function Header({
             text-align: left;
             font-size: 14px;
             font-weight: 650;
+            text-decoration: none;
           }
 
           .mobile-navigation__link--active {

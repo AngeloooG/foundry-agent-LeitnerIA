@@ -12,11 +12,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 
-import type { Page } from "../App";
-
-interface HomeProps {
-  onNavigate: (page: Page, id?: number) => void;
-}
+import { Link } from "react-router";
 
 interface Benefit {
   title: string;
@@ -152,7 +148,7 @@ const steps: ProcessStep[] = [
   },
 ];
 
-export default function Home({ onNavigate }: HomeProps) {
+export default function Home() {
   return (
     <main className="app-shell">
       <section className="hero grid-bg">
@@ -173,14 +169,13 @@ export default function Home({ onNavigate }: HomeProps) {
             </p>
 
             <div className="hero-actions">
-              <button
-                type="button"
+              <Link
                 className="primary-btn hero-primary-action"
-                onClick={() => onNavigate("agent")}
+                to="/agente"
               >
                 <span aria-hidden="true">→</span>
                 Probar agente
-              </button>
+              </Link>
             </div>
 
             <div className="tech-row">
@@ -301,14 +296,13 @@ export default function Home({ onNavigate }: HomeProps) {
           </div>
 
           <div className="process-action">
-            <button
-              type="button"
+            <Link
               className="dark-btn process-button"
-              onClick={() => onNavigate("agent")}
+              to="/agente"
             >
               Probar Leitner IA
               <span aria-hidden="true">→</span>
-            </button>
+            </Link>
           </div>
         </div>
       </section>
@@ -363,6 +357,7 @@ export default function Home({ onNavigate }: HomeProps) {
           align-items: center;
           justify-content: center;
           gap: 9px;
+          text-decoration: none;
         }
 
         .hero-grid {
@@ -777,6 +772,7 @@ export default function Home({ onNavigate }: HomeProps) {
           justify-content: center;
           gap: 10px;
           padding: 14px 26px;
+          text-decoration: none;
         }
 
         .process-button span {

@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import type { Page } from "../App";
+import type { ChangeEvent, DragEvent, ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAuth } from "../hooks/useAuth";
+import { useAgentConsoleState } from "../hooks/useAppState";
 
 import {
-    extractFirstDownloadUrl,
     streamAgentMessage,
     type AgentAnnotation,
 } from "../services/agentStreamClient";
 
+import {
+    formatAttachmentConstraints,
+    mergeAttachmentSelection,
+    prepareAgentAttachments,
+    removeAttachmentAt,
+} from "../services/agentAttachments";
 import {
     buildBattlecardPrompt,
     initialBattlecardForm,
@@ -18,9 +25,6 @@ import {
     type BattlecardForm,
     type BattlecardFormErrors,
 } from "./agentConsoleForm";
-interface Props {
-    onNavigate: (page: Page, id?: number) => void;
-}
 
 type MessageRole = "user" | "agent" | "system";
 
@@ -28,12 +32,6 @@ interface ChatMessage {
     id: string;
     role: MessageRole;
     text: string;
-}
-
-interface BattlecardResult {
-    fileName?: string;
-    downloadUrl?: string;
-    rawText?: string;
 }
 
 const sectorOptions = [
@@ -58,37 +56,77 @@ function createId() {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
+export default function AgentConsole() {
     const { getAccessToken } = useAuth();
+    const {
+        agentConsole,
+        patchAgentConsole,
+        resetAgentConsole,
+    } = useAgentConsoleState();
 
+    /*
+     * Se hidrata desde AppContext y se conserva localmente durante el montaje.
+     * Esto mantiene seguras las actualizaciones funcionales frecuentes del
+     * streaming y sincroniza la sesión cuando el usuario cambia de ruta.
+     */
     const [form, setForm] = useState<BattlecardForm>(
-        initialBattlecardForm
+        () => agentConsole.form
     );
-
     const [formErrors, setFormErrors] =
-        useState<BattlecardFormErrors>({});
-
+        useState<BattlecardFormErrors>(() => agentConsole.formErrors);
     const [hasPreparedPrompt, setHasPreparedPrompt] =
-        useState(false);
-
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        {
-            id: createId(),
-            role: "agent",
-            text:
-                "Hola, soy Leitner IA. Puedes conversar conmigo libremente o completar el formulario para preparar una solicitud estructurada. El formulario no enviará nada automáticamente: podrás revisar y editar la solicitud antes de enviarla.",
-        },
-    ]);
-
-    const [chatInput, setChatInput] = useState("");
-    const [conversationId, setConversationId] = useState<string | null>(null);
+        useState(() => agentConsole.hasPreparedPrompt);
+    const [messages, setMessages] = useState<ChatMessage[]>(
+        () => agentConsole.messages
+    );
+    const [chatInput, setChatInput] = useState(
+        () => agentConsole.chatInput
+    );
+    const [conversationId, setConversationId] = useState<string | null>(
+        () => agentConsole.conversationId
+    );
     const [isStreaming, setIsStreaming] = useState(false);
     const [toolStatus, setToolStatus] = useState<string>("");
-    const [result, setResult] = useState<BattlecardResult | null>(null);
-    const [annotations, setAnnotations] = useState<AgentAnnotation[]>([]);
+    const [annotations, setAnnotations] = useState<AgentAnnotation[]>(
+        () => agentConsole.annotations
+    );
 
     const chatEndRef = useRef<HTMLDivElement | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [selectedFiles, setSelectedFiles] = useState<File[]>(
+        () => agentConsole.selectedFiles
+    );
+    const [attachmentErrors, setAttachmentErrors] = useState<string[]>(
+        () => agentConsole.attachmentErrors
+    );
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+    const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
+
+    useEffect(() => {
+        patchAgentConsole({
+            form,
+            formErrors,
+            hasPreparedPrompt,
+            messages,
+            chatInput,
+            conversationId,
+            annotations,
+            selectedFiles,
+            attachmentErrors,
+        });
+    }, [
+        form,
+        formErrors,
+        hasPreparedPrompt,
+        messages,
+        chatInput,
+        conversationId,
+        annotations,
+        selectedFiles,
+        attachmentErrors,
+        patchAgentConsole,
+    ]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -163,7 +201,63 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         );
     };
 
-    const runAgent = async (message: string, mode: "chat" | "form") => {
+    const addSelectedFiles = (incomingFiles: File[]) => {
+        if (incomingFiles.length === 0 || isStreaming) {
+            return;
+        }
+
+        const { acceptedFiles, rejectedMessages } =
+            mergeAttachmentSelection(selectedFiles, incomingFiles);
+
+        if (acceptedFiles.length > 0) {
+            setSelectedFiles((previous) => [
+                ...previous,
+                ...acceptedFiles,
+            ]);
+            setHasPreparedPrompt(false);
+        }
+
+        setAttachmentErrors(rejectedMessages);
+    };
+
+    const handleFileInputChange = (
+        event: ChangeEvent<HTMLInputElement>
+    ) => {
+        addSelectedFiles(Array.from(event.target.files ?? []));
+        event.target.value = "";
+    };
+
+    const handleFileDrop = (event: DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDraggingFiles(false);
+        addSelectedFiles(Array.from(event.dataTransfer.files));
+    };
+
+    const removeSelectedFile = (index: number) => {
+        if (isStreaming) {
+            return;
+        }
+
+        setSelectedFiles((previous) => removeAttachmentAt(previous, index));
+        setAttachmentErrors([]);
+        setHasPreparedPrompt(false);
+    };
+
+    const clearSelectedFiles = () => {
+        if (isStreaming) {
+            return;
+        }
+
+        setSelectedFiles([]);
+        setAttachmentErrors([]);
+        setHasPreparedPrompt(false);
+    };
+
+    const runAgent = async (
+        message: string,
+        files: File[]
+    ) => {
         if (isStreaming) return;
 
         const trimmedMessage = message.trim();
@@ -175,7 +269,6 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         setIsStreaming(true);
         setToolStatus("");
         setAnnotations([]);
-        setResult(null);
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
@@ -193,6 +286,10 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                 return;
             }
 
+            setIsPreparingAttachments(files.length > 0);
+            const preparedAttachments = await prepareAgentAttachments(files);
+            setIsPreparingAttachments(false);
+
             let streamedText = "";
             const collectedAnnotations: AgentAnnotation[] = [];
 
@@ -201,8 +298,8 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                     message: trimmedMessage,
                     token,
                     conversationId,
-                    imageDataUris: [],
-                    fileDataUris: [],
+                    imageDataUris: preparedAttachments.imageDataUris,
+                    fileDataUris: preparedAttachments.fileDataUris,
                     signal: controller.signal,
                 },
                 {
@@ -229,17 +326,9 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                 }
             );
 
-            const downloadUrlFromText = extractFirstDownloadUrl(streamedText);
-            const downloadUrlFromAnnotation = collectedAnnotations.find((item) => item.url)?.url;
-
-            const downloadUrl = downloadUrlFromText || downloadUrlFromAnnotation;
-
-            if (mode === "form" || downloadUrl) {
-                setResult({
-                    fileName: buildSuggestedFileName(),
-                    downloadUrl: downloadUrl || undefined,
-                    rawText: streamedText,
-                });
+            if (files.length > 0) {
+                setSelectedFiles([]);
+                setAttachmentErrors([]);
             }
 
             if (!streamedText.trim()) {
@@ -261,6 +350,7 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                 );
             }
         } finally {
+            setIsPreparingAttachments(false);
             setIsStreaming(false);
             setToolStatus("");
             abortControllerRef.current = null;
@@ -274,14 +364,14 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
             return;
         }
 
-        const mode = hasPreparedPrompt ? "form" : "chat";
+        const filesToSend = [...selectedFiles];
 
         setChatInput("");
         setHasPreparedPrompt(false);
 
         addMessage("user", text);
 
-        await runAgent(text, mode);
+        await runAgent(text, filesToSend);
     };
 
     const cancelStreaming = () => {
@@ -300,7 +390,10 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
             return;
         }
 
-        const generatedPrompt = buildBattlecardPrompt(form);
+        const generatedPrompt = buildBattlecardPrompt(
+            form,
+            selectedFiles.map((file) => file.name)
+        );
 
         setChatInput(generatedPrompt);
         setHasPreparedPrompt(true);
@@ -318,6 +411,7 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
 
     const resetConversation = () => {
         abortControllerRef.current?.abort();
+        resetAgentConsole();
         setConversationId(null);
         setMessages([
             {
@@ -329,36 +423,14 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         ]);
         setChatInput("");
         setToolStatus("");
-        setResult(null);
         setAnnotations([]);
         setHasPreparedPrompt(false);
         setFormErrors({});
+        setSelectedFiles([]);
+        setAttachmentErrors([]);
+        setIsDraggingFiles(false);
+        setForm({ ...initialBattlecardForm });
     };
-
-    const buildSuggestedFileName = () => {
-        const company = form.company.trim() || "CONSEIN";
-
-        const competitorSummary =
-            form.competitors
-                .split(/[,;\n]/)
-                .map((item) => item.trim())
-                .find(Boolean) || "Competencia";
-
-        const sanitizedCompany = company.replace(
-            /[^\wáéíóúÁÉÍÓÚñÑ-]+/g,
-            "_"
-        );
-
-        const sanitizedCompetitor = competitorSummary.replace(
-            /[^\wáéíóúÁÉÍÓÚñÑ-]+/g,
-            "_"
-        );
-
-        return `Battlecard_${sanitizedCompany}_vs_${sanitizedCompetitor}_${new Date()
-            .toISOString()
-            .slice(0, 10)}.docx`;
-    };
-
     return (
         <main className="app-shell agent-page">
             <section className="agent-top">
@@ -640,28 +712,120 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                             </Field>
                         </div>
 
-                        <div
-                            className="upload-box upload-box--pending"
-                            aria-disabled="true"
-                        >
-                            <span
-                                className="upload-box__icon"
-                                aria-hidden="true"
+                        <div className="attachment-section">
+                            <div className="attachment-section__heading">
+                                <div>
+                                    <strong>Archivos de referencia</strong>
+                                    <span>Opcional</span>
+                                </div>
+
+                                {selectedFiles.length > 0 && (
+                                    <button
+                                        type="button"
+                                        className="clear-files-button"
+                                        onClick={clearSelectedFiles}
+                                        disabled={isStreaming}
+                                    >
+                                        Quitar todos
+                                    </button>
+                                )}
+                            </div>
+
+                            <input
+                                ref={fileInputRef}
+                                className="visually-hidden-file-input"
+                                type="file"
+                                multiple
+                                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,text/html,application/xml,text/xml,.md,.markdown,.txt,.csv,.json,.html,.htm,.xml,.pdf"
+                                onChange={handleFileInputChange}
+                                disabled={isStreaming}
+                            />
+
+                            <div
+                                className={
+                                    isDraggingFiles
+                                        ? "upload-box upload-box--active"
+                                        : "upload-box"
+                                }
+                                role="button"
+                                tabIndex={isStreaming ? -1 : 0}
+                                aria-label="Seleccionar o arrastrar archivos de referencia"
+                                onClick={() => {
+                                    if (!isStreaming) {
+                                        fileInputRef.current?.click();
+                                    }
+                                }}
+                                onKeyDown={(event) => {
+                                    if (
+                                        !isStreaming &&
+                                        (event.key === "Enter" || event.key === " ")
+                                    ) {
+                                        event.preventDefault();
+                                        fileInputRef.current?.click();
+                                    }
+                                }}
+                                onDragEnter={(event) => {
+                                    event.preventDefault();
+                                    if (!isStreaming) setIsDraggingFiles(true);
+                                }}
+                                onDragOver={(event) => {
+                                    event.preventDefault();
+                                    if (!isStreaming) setIsDraggingFiles(true);
+                                }}
+                                onDragLeave={(event) => {
+                                    event.preventDefault();
+                                    if (event.currentTarget === event.target) {
+                                        setIsDraggingFiles(false);
+                                    }
+                                }}
+                                onDrop={handleFileDrop}
+                                aria-disabled={isStreaming}
                             >
-                                +
-                            </span>
+                                <span className="upload-box__icon" aria-hidden="true">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                        <path d="M12 16V4M7 9l5-5 5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                        <path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                                    </svg>
+                                </span>
+                                <strong>Selecciona o arrastra archivos</strong>
+                                <span>PDF, TXT, MD, CSV, JSON, HTML, XML o imágenes</span>
+                                <small>{formatAttachmentConstraints()}</small>
+                            </div>
 
-                            <strong>
-                                Archivos de referencia
-                            </strong>
+                            {attachmentErrors.length > 0 && (
+                                <div className="attachment-errors" role="alert">
+                                    <strong>No se agregaron algunos archivos</strong>
+                                    <ul>
+                                        {attachmentErrors.map((error) => (
+                                            <li key={error}>{error}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
-                            <span>
-                                PDF, TXT, Markdown, CSV, JSON, HTML, XML o imágenes
-                            </span>
-
-                            <small>
-                                La selección real de archivos se habilitará en el Lote 2B.
-                            </small>
+                            {selectedFiles.length > 0 && (
+                                <div className="selected-files" aria-label="Archivos seleccionados">
+                                    {selectedFiles.map((file, index) => (
+                                        <div className="selected-file" key={`${file.name}-${file.size}-${file.lastModified}`}>
+                                            <span className="selected-file__icon" aria-hidden="true">
+                                                {file.type.startsWith("image/") ? "IMG" : "DOC"}
+                                            </span>
+                                            <span className="selected-file__content">
+                                                <strong title={file.name}>{file.name}</strong>
+                                                <small>{formatFileSize(file.size)}</small>
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeSelectedFile(index)}
+                                                disabled={isStreaming}
+                                                aria-label={`Quitar ${file.name}`}
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <button
@@ -733,11 +897,20 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
 
                     <div className="chat-body">
                         {messages.map((message) => (
-                            <div key={message.id} className={`msg ${message.role}`}>
-                                {message.text}
+                            <div
+                                key={message.id}
+                                className={`msg ${message.role}`}
+                            >
+                                <MarkdownMessage content={message.text} />
                             </div>
                         ))}
 
+                        {isPreparingAttachments && (
+                            <div className="tool-status">
+                                <span className="pulse-dot" />
+                                Preparando archivos adjuntos...
+                            </div>
+                        )}
                         {toolStatus && (
                             <div className="tool-status">
                                 <span className="pulse-dot" />
@@ -766,33 +939,6 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                                     </span>
                                 ))}
                             </div>
-                        </div>
-                    )}
-
-                    {result && (
-                        <div className="result-box">
-                            <div>
-                                <strong>Resultado de Battlecard</strong>
-                                <p>{result.fileName || "Battlecard generada por Leitner IA"}</p>
-                            </div>
-
-                            <div className="result-actions">
-                                {result.downloadUrl ? (
-                                    <a className="primary-btn result-link" href={result.downloadUrl} target="_blank" rel="noreferrer">
-                                        Descargar Battlecard
-                                    </a>
-                                ) : (
-                                    <button className="primary-btn" disabled>
-                                        Enlace no disponible
-                                    </button>
-                                )}
-                            </div>
-
-                            {!result.downloadUrl && (
-                                <small>
-                                    El agente respondió, pero no devolvió URL de descarga. Si esperas documento final, valida que la herramienta MCP o Power Automate devuelva explícitamente el enlace.
-                                </small>
-                            )}
                         </div>
                     )}
 
@@ -869,6 +1015,19 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                             />
 
                             <div className="input-actions">
+                                <button
+                                    type="button"
+                                    className="attach-chat-button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isStreaming}
+                                    aria-label="Adjuntar archivos al mensaje"
+                                    title="Adjuntar archivos"
+                                >
+                                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M21.4 11.6l-8.9 8.9a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                    <span>{selectedFiles.length > 0 ? selectedFiles.length : ""}</span>
+                                </button>
                                 {isStreaming ? (
                                     <button
                                         type="button"
@@ -893,7 +1052,9 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
                         <small className="chat-input-help">
                             {hasPreparedPrompt
                                 ? "Revisa la solicitud completa. En este modo debes usar el botón Enviar."
-                                : "Presiona Enter para enviar o Shift + Enter para crear una nueva línea."}
+                                : selectedFiles.length > 0
+                                    ? `${selectedFiles.length} archivo(s) se enviarán con el mensaje.`
+                                    : "Presiona Enter para enviar o Shift + Enter para crear una nueva línea."}
                         </small>
                     </div>
                 </section>
@@ -942,12 +1103,14 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         }
 
         .agent-layout {
-        display: grid;
-        grid-template-columns: minmax(390px, 440px) minmax(0, 1fr);
-        gap: 22px;
-        padding-top: 22px;
-        padding-bottom: 40px;
-        align-items: start;
+          width: min(100%, 1560px);
+          max-width: 1560px;
+          display: grid;
+          grid-template-columns: minmax(390px, 440px) minmax(0, 1fr);
+          gap: 22px;
+          padding-top: 22px;
+          padding-bottom: 40px;
+          align-items: start;
         }
 
         .form-panel {
@@ -1231,52 +1394,178 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         text-transform: uppercase;
         }
 
+        .attachment-section {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .attachment-section__heading {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .attachment-section__heading > div {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .attachment-section__heading strong {
+          color: #123263;
+          font-size: 12px;
+        }
+        .attachment-section__heading span {
+          border-radius: 999px;
+          padding: 3px 7px;
+          background: #eef2f6;
+          color: #718096;
+          font-size: 9px;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+        .clear-files-button {
+          border: 0;
+          background: transparent;
+          color: #64748b;
+          padding: 4px;
+          font-size: 10px;
+          font-weight: 750;
+        }
+        .clear-files-button:hover { color: #b91c1c; }
+        .visually-hidden-file-input {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
+        }
         .upload-box {
-        border: 1.5px dashed #cbd8e5;
-        border-radius: 11px;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 5px;
-        background: #f8fafc;
-        text-align: center;
+          border: 1.5px dashed #b9cad9;
+          border-radius: 11px;
+          padding: 17px 14px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          background: #f8fafc;
+          text-align: center;
+          cursor: pointer;
+          outline: none;
+          transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
         }
-
-        .upload-box--pending {
-        opacity: 0.8;
+        .upload-box:hover,
+        .upload-box:focus-visible,
+        .upload-box--active {
+          border-color: #4389b5;
+          background: #eef7fc;
+          box-shadow: 0 0 0 3px rgba(124, 188, 227, 0.14);
         }
-
+        .upload-box[aria-disabled="true"] {
+          cursor: not-allowed;
+          opacity: 0.65;
+        }
         .upload-box__icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 9px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: #e8f2fa;
-        color: #005b96;
-        font-size: 20px;
-        line-height: 1;
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #e8f2fa;
+          color: #005b96;
         }
-
-        .upload-box strong {
-        color: #334155;
-        font-size: 11px;
+        .upload-box strong { color: #334155; font-size: 11px; }
+        .upload-box > span:not(.upload-box__icon) { color: #64748b; font-size: 10px; line-height: 1.4; }
+        .upload-box small { max-width: 340px; color: #8492a3; font-size: 9px; line-height: 1.45; }
+        .attachment-errors {
+          border: 1px solid #fecaca;
+          border-radius: 9px;
+          padding: 10px 11px;
+          background: #fef2f2;
+          color: #991b1b;
         }
-
-        .upload-box > span:not(.upload-box__icon) {
-        color: #64748b;
-        font-size: 10px;
-        line-height: 1.4;
+        .attachment-errors strong { display: block; font-size: 10px; }
+        .attachment-errors ul { margin: 5px 0 0; padding-left: 17px; }
+        .attachment-errors li { font-size: 9px; line-height: 1.5; }
+        .selected-files { display: grid; gap: 8px; }
+        .selected-file {
+          min-width: 0;
+          display: grid;
+          grid-template-columns: 34px minmax(0, 1fr) 28px;
+          gap: 9px;
+          align-items: center;
+          border: 1px solid #dbe7f0;
+          border-radius: 9px;
+          padding: 8px;
+          background: #ffffff;
         }
-
-        .upload-box small {
-        color: #94a3b8;
-        font-size: 9px;
-        line-height: 1.4;
+        .selected-file__icon {
+          width: 34px;
+          height: 34px;
+          border-radius: 8px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #edf5fb;
+          color: #005b96;
+          font-size: 8px;
+          font-weight: 900;
         }
-
+        .selected-file__content { min-width: 0; }
+        .selected-file__content strong,
+        .selected-file__content small { display: block; }
+        .selected-file__content strong {
+          overflow: hidden;
+          color: #334155;
+          font-size: 10px;
+          line-height: 1.35;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .selected-file__content small { margin-top: 2px; color: #8492a3; font-size: 9px; }
+        .selected-file > button {
+          width: 28px;
+          height: 28px;
+          border: 0;
+          border-radius: 7px;
+          background: transparent;
+          color: #64748b;
+          font-size: 18px;
+          line-height: 1;
+        }
+        .selected-file > button:hover { background: #fef2f2; color: #b91c1c; }
+        .attach-chat-button {
+          position: relative;
+          min-width: 42px;
+          height: 42px;
+          border: 1px solid #d8e2ec;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #f8fafc;
+          color: #005b96;
+        }
+        .attach-chat-button:hover { border-color: #7cbce3; background: #eef7fc; }
+        .attach-chat-button span:not(:empty) {
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: #8cc63f;
+          color: #ffffff;
+          font-size: 9px;
+          font-weight: 900;
+        }
         .prepare-prompt-button {
         width: 100%;
         min-height: 44px;
@@ -1327,6 +1616,8 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         }
 
         .chat-panel {
+          width: 100%;
+          min-width: 0;
           overflow: hidden;
           display: flex;
           flex-direction: column;
@@ -1492,31 +1783,48 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
         }
 
         .chat-body {
+          min-width: 0;
           flex: 1;
           padding: 18px;
           display: flex;
           flex-direction: column;
           gap: 12px;
-          overflow: auto;
+          overflow-y: auto;
+          overflow-x: hidden;
           min-height: 360px;
           max-height: calc(100vh - 390px);
         }
 
         .msg {
+          min-width: 0;
           max-width: 84%;
           padding: 12px 14px;
           border-radius: 14px;
           font-size: 13px;
           line-height: 1.65;
-          white-space: pre-wrap;
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .msg span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .msg.agent {
           align-self: flex-start;
+          max-width: 94%;
           background: #f5f8fb;
           border: 1px solid #dde6ef;
           color: #334155;
           border-top-left-radius: 4px;
+        }
+
+        .msg.agent:has(.markdown-table-container) {
+          width: 100%;
+          max-width: 100%;
         }
 
         .msg.user {
@@ -1532,6 +1840,311 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           border: 1px solid #fed7aa;
           color: #9a3412;
           max-width: 92%;
+        }
+
+        .markdown-message {
+          min-width: 0;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .markdown-message > :first-child {
+          margin-top: 0;
+        }
+
+        .markdown-message > :last-child {
+          margin-bottom: 0;
+        }
+
+        .markdown-message p {
+          margin: 0 0 10px;
+          line-height: 1.7;
+        }
+
+        .markdown-message h1,
+        .markdown-message h2,
+        .markdown-message h3,
+        .markdown-message h4 {
+          color: #17263a;
+          line-height: 1.25;
+          letter-spacing: -0.015em;
+          text-wrap: balance;
+        }
+
+        .markdown-message h1 {
+          margin: 22px 0 12px;
+          font-size: 23px;
+        }
+
+        .markdown-message h2 {
+          margin: 20px 0 11px;
+          padding-bottom: 7px;
+          border-bottom: 1px solid #dce6ef;
+          font-size: 20px;
+        }
+
+        .markdown-message h3 {
+          margin: 18px 0 9px;
+          font-size: 17px;
+        }
+
+        .markdown-message h4 {
+          margin: 16px 0 8px;
+          font-size: 15px;
+        }
+
+        .markdown-message ul,
+        .markdown-message ol {
+          margin: 8px 0 12px;
+          padding-left: 24px;
+        }
+
+        .markdown-message li {
+          margin: 5px 0;
+          line-height: 1.65;
+        }
+
+        .markdown-message blockquote {
+          margin: 12px 0;
+          border-left: 4px solid #7cbce3;
+          border-radius: 0 8px 8px 0;
+          padding: 10px 14px;
+          background: #edf6fc;
+          color: #3f5268;
+        }
+
+        .markdown-message blockquote p {
+          margin: 0;
+        }
+
+        .markdown-message code {
+          border-radius: 5px;
+          padding: 2px 5px;
+          background: #e9eff5;
+          color: #123263;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 0.9em;
+        }
+
+        .markdown-message pre {
+          max-width: 100%;
+          margin: 12px 0;
+          overflow-x: auto;
+          border-radius: 10px;
+          padding: 14px;
+          background: #081527;
+          color: #eaf4fb;
+        }
+
+        .markdown-message pre code {
+          padding: 0;
+          background: transparent;
+          color: inherit;
+        }
+
+        .markdown-message hr {
+          margin: 18px 0;
+          border: 0;
+          border-top: 1px solid #dce6ef;
+        }
+
+        .markdown-message strong {
+          color: #17263a;
+          font-weight: 800;
+        }
+
+        .markdown-message em {
+          color: #475569;
+        }
+
+        .markdown-message a:not(.message-link--generated-file) {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .markdown-message input[type="checkbox"] {
+          margin-right: 7px;
+          accent-color: #005b96;
+        }
+
+        .markdown-table-block {
+          min-width: 0;
+          max-width: 100%;
+          margin: 14px 0 18px;
+        }
+
+        .markdown-table-hint {
+          display: none;
+          margin-top: 6px;
+          color: #718096;
+          font-size: 10px;
+          line-height: 1.4;
+        }
+
+        .markdown-table-container {
+          width: 100%;
+          max-width: 100%;
+          margin: 0;
+          overflow-x: auto;
+          overscroll-behavior-inline: contain;
+          border: 1px solid #cfdbe6;
+          border-radius: 12px;
+          background: #ffffff;
+          box-shadow: 0 3px 12px rgba(18, 50, 99, 0.06);
+          scrollbar-width: thin;
+          scrollbar-color: #9aabba #eef3f7;
+        }
+
+        .markdown-table-container:focus-visible {
+          outline: 3px solid rgba(124, 188, 227, 0.38);
+          outline-offset: 2px;
+        }
+
+        .markdown-table {
+          width: max-content;
+          min-width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+          color: #334155;
+          font-size: 12px;
+          line-height: 1.5;
+          white-space: normal;
+        }
+
+        .markdown-table th,
+        .markdown-table td {
+          min-width: 150px;
+          max-width: 300px;
+          padding: 11px 13px;
+          vertical-align: top;
+          border-right: 1px solid #dce6ef;
+          border-bottom: 1px solid #dce6ef;
+          overflow-wrap: anywhere;
+          word-break: normal;
+        }
+
+        .markdown-table th:first-child,
+        .markdown-table td:first-child {
+          min-width: 170px;
+          font-weight: 750;
+        }
+
+        .markdown-table tbody td:first-child {
+          position: sticky;
+          left: 0;
+          z-index: 1;
+          background: #ffffff;
+          box-shadow: 1px 0 0 #dce6ef;
+        }
+
+        .markdown-table tbody tr:nth-child(even) td:first-child {
+          background: #f6f9fc;
+        }
+
+        .markdown-table tbody tr:hover td:first-child {
+          background: #edf6fc;
+        }
+
+        .markdown-table th {
+          position: sticky;
+          top: 0;
+          z-index: 1;
+          background: #123263;
+          color: #ffffff;
+          font-weight: 800;
+          text-align: left;
+        }
+
+        .markdown-table th:first-child {
+          left: 0;
+          z-index: 3;
+          box-shadow: 1px 0 0 rgba(255, 255, 255, 0.18);
+        }
+
+        .markdown-table tbody tr:nth-child(even) td {
+          background: #f6f9fc;
+        }
+
+        .markdown-table tbody tr:hover td {
+          background: #edf6fc;
+        }
+
+        .markdown-table th:last-child,
+        .markdown-table td:last-child {
+          border-right: 0;
+        }
+
+        .markdown-table tbody tr:last-child td {
+          border-bottom: 0;
+        }
+
+        .message-link--generated-file {
+          display: inline-flex;
+          align-items: center;
+          max-width: 100%;
+          box-sizing: border-box;
+          margin: 4px 2px;
+          border: 1px solid rgba(0, 91, 150, 0.22);
+          border-radius: 8px;
+          padding: 7px 11px;
+          background: #eaf4fb;
+          color: #005b96;
+          font-weight: 800;
+          line-height: 1.35;
+          text-decoration: none;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          transition:
+            background-color 150ms ease,
+            border-color 150ms ease,
+            color 150ms ease;
+        }
+
+        .message-link--generated-file:hover {
+          border-color: #7cbce3;
+          background: #dceefa;
+          color: #123263;
+          text-decoration: underline;
+        }
+
+        .message-link--generated-file:focus-visible {
+          outline: 3px solid rgba(124, 188, 227, 0.35);
+          outline-offset: 2px;
+        }
+
+
+        .message-inline-link {
+          color: #005b96;
+          font-weight: 650;
+          text-decoration: underline;
+          text-decoration-thickness: 1px;
+          text-underline-offset: 2px;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .message-inline-link:hover {
+          color: #123263;
+        }
+
+        .message-inline-link:focus-visible {
+          border-radius: 3px;
+          outline: 3px solid rgba(124, 188, 227, 0.35);
+          outline-offset: 2px;
+        }
+
+
+        .msg.user .markdown-message h1,
+        .msg.user .markdown-message h2,
+        .msg.user .markdown-message h3,
+        .msg.user .markdown-message h4 {
+          color: #ffffff;
+          border-bottom-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .msg.user .message-inline-link {
+          color: #d9f0ff;
         }
 
         .tool-status {
@@ -1610,46 +2223,6 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           background: #fff;
         }
 
-        .result-box {
-          margin: 0 18px 14px;
-          border-radius: 12px;
-          border: 1px solid #dde6ef;
-          padding: 16px;
-          background: #f8fbfe;
-        }
-
-        .result-box strong {
-          display: block;
-          font-size: 14px;
-        }
-
-        .result-box p {
-          color: #53637a;
-          font-family: "JetBrains Mono";
-          font-size: 12px;
-          margin: 6px 0 14px;
-          word-break: break-word;
-        }
-
-        .result-box small {
-          display: block;
-          margin-top: 10px;
-          color: #8a98a8;
-          line-height: 1.45;
-        }
-
-        .result-actions {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .result-link {
-          text-decoration: none;
-          display: inline-flex;
-          align-items: center;
-        }
-
         .quick-row {
           border-top: 1px solid #dde6ef;
           padding: 12px 18px;
@@ -1725,7 +2298,14 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           font-weight: 800;
         }
 
-        @media (max-width: 980px) {
+        @media (min-width: 1121px) and (max-width: 1320px) {
+          .agent-layout {
+            grid-template-columns: 390px minmax(0, 1fr);
+            gap: 18px;
+          }
+        }
+
+        @media (max-width: 1120px) {
           .agent-layout {
             grid-template-columns: 1fr;
           }
@@ -1744,11 +2324,12 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           }
 
           .chat-panel {
-            min-height: 620px;
+            min-width: 0;
           }
 
           .chat-body {
-            max-height: none;
+            min-width: 0;
+            overflow-x: hidden;
           }
         }
 
@@ -1770,6 +2351,38 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           .chat-input-area--prepared .chat-input-row textarea {
             min-height: 280px;
           }
+          .markdown-table-hint {
+            display: block;
+          }
+
+          .markdown-table {
+            font-size: 11px;
+          }
+
+          .markdown-table th,
+          .markdown-table td {
+            min-width: 132px;
+            max-width: 250px;
+            padding: 9px 10px;
+          }
+
+          .markdown-table th:first-child,
+          .markdown-table td:first-child {
+            min-width: 145px;
+          }
+
+          .markdown-message h1 {
+            font-size: 20px;
+          }
+
+          .markdown-message h2 {
+            font-size: 18px;
+          }
+
+          .markdown-message h3 {
+            font-size: 16px;
+          }
+
           .analysis-option {
             padding: 11px;
           }
@@ -1784,14 +2397,109 @@ export default function AgentConsole({ onNavigate: _onNavigate }: Props) {
           .chat-input-row {
             grid-template-columns: 1fr;
           }
-
-          .msg {
-            max-width: 94%;
+          .input-actions {
+            width: 100%;
           }
+          .input-actions .dark-btn,
+          .input-actions .cancel-btn {
+            flex: 1;
+          }
+          .selected-file {
+            grid-template-columns: 32px minmax(0, 1fr) 28px;
+          }
+
         }
       `}</style>
         </main>
     );
+}
+
+function MarkdownMessage({
+    content,
+}: {
+    content: string;
+}) {
+    return (
+        <div className="markdown-message">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    a({ href, children }) {
+                        if (!href) {
+                            return <>{children}</>;
+                        }
+
+                        const isGeneratedSharePointFile =
+                            isConseinSharePointUrl(href);
+
+                        return (
+                            <a
+                                className={
+                                    isGeneratedSharePointFile
+                                        ? "message-link message-link--generated-file"
+                                        : "message-inline-link"
+                                }
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={
+                                    isGeneratedSharePointFile
+                                        ? "Abrir archivo generado en SharePoint"
+                                        : href
+                                }
+                            >
+                                {isGeneratedSharePointFile
+                                    ? "Abrir archivo generado"
+                                    : children}
+                            </a>
+                        );
+                    },
+                    table({ children }) {
+                        return (
+                            <div className="markdown-table-block">
+                                <div
+                                    className="markdown-table-container"
+                                    role="region"
+                                    aria-label="Tabla de comparación desplazable"
+                                    tabIndex={0}
+                                >
+                                    <table className="markdown-table">
+                                        {children}
+                                    </table>
+                                </div>
+                                <small className="markdown-table-hint">
+                                    Desliza horizontalmente para ver todas las columnas.
+                                </small>
+                            </div>
+                        );
+                    },
+                }}
+            >
+                {content}
+            </ReactMarkdown>
+        </div>
+    );
+}
+
+
+function isConseinSharePointUrl(value: string): boolean {
+    try {
+        const parsedUrl = new URL(value);
+
+        return (
+            parsedUrl.protocol === "https:" &&
+            parsedUrl.hostname.toLowerCase() ===
+            "conseincloud.sharepoint.com"
+        );
+    } catch {
+        return false;
+    }
+}
+
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Field({
