@@ -1213,7 +1213,7 @@ describe('appReducer', () => {
       ).toEqual([]);
     });
 
-    it('stores messages, annotations, and generated result', () => {
+    it('stores messages and annotations', () => {
       const state = createInitialState();
 
       const result = appReducer(state, {
@@ -1234,13 +1234,6 @@ describe('appReducer', () => {
               url: 'https://example.com',
             },
           ],
-
-          result: {
-            fileName: 'Battlecard_CONSEIN.docx',
-            downloadUrl:
-              'https://example.com/battlecard.docx',
-            rawText: 'Contenido generado',
-          },
         },
       });
 
@@ -1255,10 +1248,6 @@ describe('appReducer', () => {
       expect(
         result.agentConsole.annotations
       ).toHaveLength(1);
-
-      expect(
-        result.agentConsole.result?.fileName
-      ).toBe('Battlecard_CONSEIN.docx');
     });
   });
 
@@ -1301,11 +1290,6 @@ describe('appReducer', () => {
             url: 'https://example.com',
           },
         ],
-
-        result: {
-          fileName:
-            'resultado-temporal.docx',
-        },
 
         selectedFiles: [
           new File(
@@ -1353,10 +1337,6 @@ describe('appReducer', () => {
       expect(
         result.agentConsole.annotations
       ).toEqual([]);
-
-      expect(
-        result.agentConsole.result
-      ).toBeNull();
 
       expect(
         result.agentConsole.selectedFiles
@@ -1903,7 +1883,6 @@ describe('appReducer', () => {
     "agentConsole.formErrors",
     "agentConsole.hasPreparedPrompt",
     "agentConsole.messages",
-    "agentConsole.result",
     "agentConsole.selectedFiles",
     "auth",
     "auth.error",

@@ -155,7 +155,6 @@ export const initialAgentConsoleState: AgentConsoleState = {
   chatInput: "",
   hasPreparedPrompt: false,
   annotations: [],
-  result: null,
   selectedFiles: [],
   attachmentErrors: [],
 };

@@ -176,26 +176,21 @@ ${attachmentsSection}
    - Información no confirmada.
 4. Relaciona los diferenciadores con el resultado que desea lograr el cliente.
 5. Evita comparaciones genéricas que no sean relevantes para esta oportunidad.
-6. Incluye como mínimo:
-   - Resumen ejecutivo.
-   - Contexto competitivo.
-   - Perfil del cliente y prioridades del decisor.
-   - Posicionamiento recomendado para ${form.company.trim() || "CONSEIN"
-    }.
-   - Ventajas competitivas.
-   - Debilidades y riesgos.
-   - Objeciones probables.
-   - Respuestas comerciales recomendadas.
-   - Preguntas de descubrimiento para la siguiente conversación.
-   - Recomendaciones finales para el equipo comercial.
+6. El borrador debe contener ÚNICAMENTE estas seis secciones:
+   1. Resumen ejecutivo
+   2. Título del Battlecard
+   3. Subtítulo del Battlecard
+   4. Matriz comparativa
+   5. Recomendaciones finales para el equipo comercial
+   6. Referencias
 7. No inventes datos, cifras, capacidades, certificaciones, clientes ni casos de éxito.
 8. Si falta información crítica para realizar una comparación responsable, indícala antes de generar el documento final.
-9. Si la información es suficiente y existe una herramienta de generación documental, crea la Battlecard.
-10. Si se genera un documento, devuelve claramente:
+9. Si se genera un documento, devuelve claramente:
     - Nombre del archivo.
     - Estado de generación.
     - Enlace de descarga.
-11. Redacta el resultado en español profesional, preciso y orientado a venta consultiva.
+    - Ruta en Sharepoint:
+10. Redacta el resultado en español profesional, preciso y orientado a venta consultiva.
 
 ## Resultado esperado
 
