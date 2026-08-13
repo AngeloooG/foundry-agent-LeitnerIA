@@ -1,5 +1,7 @@
 # Leitner IA
 
+> 🚀 **Acceso directo a la aplicación en Azure Container Apps:** [https://ca-web-ms4xecmmlqzua.wittycliff-993fb65f.centralus.azurecontainerapps.io/](https://ca-web-ms4xecmmlqzua.wittycliff-993fb65f.centralus.azurecontainerapps.io/)
+
 ## Inteligencia competitiva lista para cada conversación comercial
 
 Los equipos de ventas no pierden oportunidades únicamente por falta de información. También las pierden porque la información llega tarde, está dispersa o no se convierte en argumentos útiles para la conversación con el cliente.
@@ -207,45 +209,6 @@ Las métricas deben obtenerse de un piloto real. Recomendamos medir:
 - Influencia en avance de oportunidades, sin atribuir automáticamente causalidad.
 
 Los valores que aparezcan en una demo deben tratarse como datos ilustrativos hasta disponer de telemetría productiva.
-
-## Propuesta de adopción
-
-### Fase 1. Definición
-
-- Seleccionar competidores y ofertas prioritarias.
-- Acordar la estructura de la Battlecard.
-- Definir fuentes autorizadas.
-- Establecer criterios de revisión.
-
-### Fase 2. Piloto
-
-- Generar Battlecards para oportunidades reales controladas.
-- Comparar tiempo y calidad frente al proceso manual.
-- Validar argumentos con ventas y preventa.
-- Registrar errores, vacíos y fuentes faltantes.
-
-### Fase 3. Estandarización
-
-- Consolidar plantillas.
-- Configurar conocimiento interno.
-- Definir responsables de aprobación.
-- Establecer caducidad y actualización de contenidos.
-
-### Fase 4. Escalamiento
-
-- Ampliar competidores, industrias y soluciones.
-- Integrar el historial con procesos comerciales.
-- Incorporar telemetría y evaluación de calidad.
-- Crear variantes por unidad de negocio o región.
-
-## Próximos pasos
-
-1. Seleccione tres competidores o alternativas frecuentes.
-2. Elija cinco oportunidades representativas.
-3. Defina qué debe contener una Battlecard aprobada.
-4. Ejecute un piloto con ventas y preventa.
-5. Compare tiempo, utilidad, precisión y nivel de corrección requerido.
-6. Escale únicamente después de establecer fuentes y gobierno.
 
 **Leitner IA convierte investigación competitiva en preparación comercial accionable.**
 

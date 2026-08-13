@@ -142,7 +142,7 @@ const steps: ProcessStep[] = [
     step: "Paso 4",
     title: "El usuario descarga el resultado",
     description:
-      "Enlace de descarga y registro automático en Battlecards recientes.",
+      "Enlace de descarga y registro automático en Sharepoint.",
     Icon: Download,
     variant: "green",
   },

@@ -144,7 +144,15 @@ export const initialAgentConsoleState: AgentConsoleState = {
       id: "leitner-initial-message",
       role: "agent",
       text:
-        "Hola, soy Leitner IA. Puedes conversar conmigo libremente o completar el formulario para preparar una solicitud estructurada. El formulario no enviará nada automáticamente: podrás revisar y editar la solicitud antes de enviarla.",
+        `Hola. Soy LeitnerIA, tu agente para construir Battlecards ejecutivos para CONSEIN.
+
+Para comenzar necesito:
+
+1. ¿Qué producto o servicio estás ofreciendo?
+2. ¿Quién es tu cliente ideal o avatar de decisión?
+3. ¿Con qué tipo de soluciones o empresas compites normalmente?
+4. ¿Qué resultado desea lograr tu cliente?
+5. ¿Quieres que te muestre una versión idealizada o una construida solo con tu información actual?`,
     },
   ],
   conversationId: null,
