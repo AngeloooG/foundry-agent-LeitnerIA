@@ -1103,12 +1103,14 @@ export default function AgentConsole() {
         }
 
         .agent-layout {
-        display: grid;
-        grid-template-columns: minmax(390px, 440px) minmax(0, 1fr);
-        gap: 22px;
-        padding-top: 22px;
-        padding-bottom: 40px;
-        align-items: start;
+          width: min(100%, 1560px);
+          max-width: 1560px;
+          display: grid;
+          grid-template-columns: minmax(390px, 440px) minmax(0, 1fr);
+          gap: 22px;
+          padding-top: 22px;
+          padding-bottom: 40px;
+          align-items: start;
         }
 
         .form-panel {
@@ -1614,6 +1616,7 @@ export default function AgentConsole() {
         }
 
         .chat-panel {
+          width: 100%;
           min-width: 0;
           overflow: hidden;
           display: flex;
@@ -1812,10 +1815,16 @@ export default function AgentConsole() {
 
         .msg.agent {
           align-self: flex-start;
+          max-width: 94%;
           background: #f5f8fb;
           border: 1px solid #dde6ef;
           color: #334155;
           border-top-left-radius: 4px;
+        }
+
+        .msg.agent:has(.markdown-table-container) {
+          width: 100%;
+          max-width: 100%;
         }
 
         .msg.user {
@@ -2289,7 +2298,14 @@ export default function AgentConsole() {
           font-weight: 800;
         }
 
-        @media (max-width: 980px) {
+        @media (min-width: 1121px) and (max-width: 1320px) {
+          .agent-layout {
+            grid-template-columns: 390px minmax(0, 1fr);
+            gap: 18px;
+          }
+        }
+
+        @media (max-width: 1120px) {
           .agent-layout {
             grid-template-columns: 1fr;
           }
