@@ -1,8 +1,7 @@
 using Azure.AI.Extensions.OpenAI;
-using Azure.AI.Projects;
 using OpenAI.Files;
 
-namespace WebApp.Api.Services;
+namespace WebApp.Api.Infrastructure.Foundry;
 
 #pragma warning disable OPENAI001
 
@@ -12,12 +11,13 @@ namespace WebApp.Api.Services;
 /// <remarks>
 /// Replaces the former <c>POST /api/files/cleanup</c> endpoint, which let any signed-in user delete every user's
 /// uploads. The GA Files API does not expose <c>expires_after</c>, so retention is enforced here.
-/// Only files whose name starts with <see cref="AgentFrameworkService.WebAppUploadFilenamePrefix"/> are touched.
+/// Only files whose name starts with <see cref="FoundryAgentGateway.UploadFilenamePrefix"/> are touched.
 /// Configuration (section <c>Uploads</c>): <c>CleanupEnabled</c>, <c>RetentionHours</c> (default 168 = 7 days),
 /// <c>CleanupIntervalHours</c> (default 6). Disabled by default in Development.
 /// With scale-to-zero the job only runs while a replica is alive, which is enough for this volume.
 /// </remarks>
 public sealed class UploadedFilesCleanupService(
+    FoundryAppClient appClient,
     IConfiguration configuration,
     IHostEnvironment environment,
     ILogger<UploadedFilesCleanupService> logger) : BackgroundService
@@ -28,8 +28,7 @@ public sealed class UploadedFilesCleanupService(
     {
         var section = configuration.GetSection("Uploads");
         var enabled = section.GetValue("CleanupEnabled", !environment.IsDevelopment());
-        var endpoint = configuration["AI_AGENT_ENDPOINT"];
-        if (!enabled || string.IsNullOrWhiteSpace(endpoint) || !Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
+        if (!enabled)
         {
             logger.LogInformation("Uploaded files cleanup is disabled");
             return;
@@ -42,11 +41,12 @@ public sealed class UploadedFilesCleanupService(
         {
             await Task.Delay(InitialDelay, stoppingToken);
 
-            var client = new AIProjectClient(endpointUri, FoundryCredentialFactory.CreateAppCredential(configuration, environment));
+            // Always the managed identity: this is an app-level maintenance job, not a user action.
+            var fileClient = appClient.Client.ProjectOpenAIClient.GetOpenAIFileClient();
             using var timer = new PeriodicTimer(interval);
             do
             {
-                await RunOnceAsync(client.ProjectOpenAIClient.GetOpenAIFileClient(), retention, stoppingToken);
+                await RunOnceAsync(fileClient, retention, stoppingToken);
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
         }
@@ -67,7 +67,7 @@ public sealed class UploadedFilesCleanupService(
             foreach (var file in files.Value)
             {
                 if (file.Filename is null
-                    || !file.Filename.StartsWith(AgentFrameworkService.WebAppUploadFilenamePrefix, StringComparison.Ordinal)
+                    || !file.Filename.StartsWith(FoundryAgentGateway.UploadFilenamePrefix, StringComparison.Ordinal)
                     || file.CreatedAt > cutoff)
                 {
                     continue;

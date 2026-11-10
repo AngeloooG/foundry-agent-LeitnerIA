@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
 using WebApp.Api.Models;
-using WebApp.Api.Services.Attachments;
+using WebApp.Api.Application.Attachments;
 
-namespace WebApp.Api.Services;
+namespace WebApp.Api.Application.Validation;
 
 /// <summary>Outcome of validating a <see cref="ChatRequest"/>.</summary>
 public sealed record ChatRequestValidationResult(

@@ -5,18 +5,24 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WebApp.Api.Application;
+using WebApp.Api.Tests.Fakes;
 
 namespace WebApp.Api.Tests.Integration;
 
 /// <summary>
-/// In-memory host for integration tests. Runs as "Production" (security headers, no CORS) and replaces
-/// Entra ID JWT validation with <see cref="TestAuthHandler"/>. No test reaches Azure: every request used
-/// here is rejected (auth, validation, rate limit) before the Foundry client is used.
+/// In-memory host for integration tests. Runs as "Production" (security headers, no CORS, generic errors),
+/// replaces Entra ID JWT validation with <see cref="TestAuthHandler"/> and the Foundry adapters with in-memory
+/// fakes, so no test reaches Azure.
 /// </summary>
 public sealed class TestWebApplicationFactory(int chatPermitsPerMinute = 100) : WebApplicationFactory<Program>
 {
+    public InMemoryConversationStore Store { get; } = new();
+    public FakeAgentGateway Agent { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Production");
@@ -33,6 +39,11 @@ public sealed class TestWebApplicationFactory(int chatPermitsPerMinute = 100) : 
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IConversationStore>();
+            services.RemoveAll<IAgentGateway>();
+            services.AddSingleton<IConversationStore>(Store);
+            services.AddSingleton<IAgentGateway>(Agent);
+
             services.AddAuthentication(options =>
                 {
                     options.DefaultScheme = TestAuthHandler.SchemeName;
@@ -42,6 +53,16 @@ public sealed class TestWebApplicationFactory(int chatPermitsPerMinute = 100) : 
                 })
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
         });
+    }
+
+    public HttpClient CreateClientFor(string? oid, string? scopes = null)
+    {
+        var client = CreateClient();
+        if (oid is not null)
+            client.DefaultRequestHeaders.Add(TestAuthHandler.OidHeader, oid);
+        if (scopes is not null)
+            client.DefaultRequestHeaders.Add(TestAuthHandler.ScopesHeader, scopes);
+        return client;
     }
 }
 

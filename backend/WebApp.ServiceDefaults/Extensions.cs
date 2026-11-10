@@ -1,10 +1,14 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+using Microsoft.AspNetCore.Http;
 using OpenTelemetry;
+using OpenTelemetry.Instrumentation.AspNetCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
@@ -47,6 +51,11 @@ public static class Extensions
                     .AddHttpClientInstrumentation();
             });
 
+        // Container probes hit the health endpoints every few seconds: keep them out of traces (noise and cost).
+        // Configured on the options type so it also applies to the instrumentation added by the Azure Monitor distro.
+        builder.Services.Configure<AspNetCoreTraceInstrumentationOptions>(options =>
+            options.Filter = context => !IsHealthProbe(context.Request.Path));
+
         builder.AddOpenTelemetryExporters();
 
         return builder;
@@ -67,11 +76,25 @@ public static class Extensions
             builder.Services.AddOpenTelemetry().UseAzureMonitor(options =>
             {
                 options.ConnectionString = aiConnStr;
+
+                // Entra ID (managed identity) authenticated ingestion. Enable together with
+                // DisableLocalAuth on Application Insights and the "Monitoring Metrics Publisher" role for the
+                // identity (see infra); otherwise telemetry would be rejected.
+                if (builder.Configuration.GetValue("Telemetry:UseEntraAuthentication", false))
+                {
+                    var clientId = builder.Configuration["MANAGED_IDENTITY_CLIENT_ID"];
+                    options.Credential = string.IsNullOrEmpty(clientId)
+                        ? new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned)
+                        : new ManagedIdentityCredential(ManagedIdentityId.FromUserAssignedClientId(clientId));
+                }
             });
         }
 
         return builder;
     }
+
+    private static bool IsHealthProbe(PathString path) =>
+        path.StartsWithSegments("/health") || path.StartsWithSegments("/alive") || path.StartsWithSegments("/api/health");
 
     public static IHostApplicationBuilder AddDefaultHealthChecks(this IHostApplicationBuilder builder)
     {

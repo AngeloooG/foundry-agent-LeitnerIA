@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Models;
-using WebApp.Api.Services.Attachments;
+using WebApp.Api.Application.Attachments;
 
 namespace WebApp.Api.Tests;
 

@@ -1,5 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using WebApp.Api.Services;
+using WebApp.Api.Infrastructure.Foundry;
 
 namespace WebApp.Api.Tests;
 
@@ -13,6 +13,6 @@ public class UploadedFilesPrefixTests
     [TestMethod]
     public void Prefix_IsStableValue()
     {
-        Assert.AreEqual("webapp-upload-", AgentFrameworkService.WebAppUploadFilenamePrefix);
+        Assert.AreEqual("webapp-upload-", FoundryAgentGateway.UploadFilenamePrefix);
     }
 }

@@ -1,7 +1,7 @@
 using System.Text;
 using WebApp.Api.Models;
 
-namespace WebApp.Api.Services.Attachments;
+namespace WebApp.Api.Application.Attachments;
 
 /// <summary>Limits applied to attachments in a single chat request.</summary>
 public sealed record AttachmentLimits
