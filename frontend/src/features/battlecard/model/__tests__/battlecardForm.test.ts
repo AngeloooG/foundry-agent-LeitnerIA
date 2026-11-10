@@ -6,7 +6,7 @@ import {
   updateFormField,
   validateBattlecardForm,
   type BattlecardForm,
-} from "../agentConsoleForm";
+} from "../battlecardForm";
 
 describe("agentConsoleForm", () => {
   const validForm: BattlecardForm = {

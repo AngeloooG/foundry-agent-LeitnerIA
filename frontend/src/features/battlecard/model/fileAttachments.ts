@@ -1,4 +1,4 @@
-import { attachmentLimits } from '../config/appConfig';
+import { attachmentLimits } from '../../../config/appConfig';
 
 export interface FileConversionResult {
   name: string;

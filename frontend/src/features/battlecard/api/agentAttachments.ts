@@ -2,9 +2,9 @@ import {
     convertFilesToDataUris,
     getEffectiveMimeType,
     validateFile,
-} from "../utils/fileAttachments";
+} from "../model/fileAttachments";
 
-import { attachmentLimits } from "../config/appConfig";
+import { attachmentLimits } from "../../../config/appConfig";
 
 import type {
     AgentFileAttachment,

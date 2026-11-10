@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 
 import { InteractionStatus, InteractionType } from "@azure/msal-browser";
 import {
@@ -19,8 +19,9 @@ import "./App.css";
 import Header from "./components/Header";
 import { ErrorBoundary } from "./components/core/ErrorBoundary";
 import { loginRequest } from "./config/authConfig";
-import AgentConsole from "./pages/AgentConsole";
-import Home from "./pages/Home";
+// Route-level code splitting: each page (and its CSS) loads on demand.
+const HomePage = lazy(() => import("./features/landing/HomePage"));
+const AgentConsolePage = lazy(() => import("./features/battlecard/AgentConsolePage"));
 
 /**
  * Root component: forces sign-in (redirect) and renders the routes once the user is authenticated.
@@ -76,11 +77,19 @@ export default function App() {
       <div className="leitner-app">
         <Header />
 
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/agente" element={<AgentConsole />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense
+          fallback={
+            <div className="loading-screen" aria-live="polite">
+              <Spinner size="large" />
+            </div>
+          }
+        >
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/agente" element={<AgentConsolePage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
     </ErrorBoundary>
   );

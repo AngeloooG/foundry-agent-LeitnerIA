@@ -1,3 +1,5 @@
+import { appConfig } from "../../../config/appConfig";
+
 export type AgentStreamEventType =
   | "conversationId"
   | "chunk"
@@ -37,7 +39,6 @@ export interface AgentAnnotation {
   url?: string;
   fileId?: string;
   containerId?: string;
-  textToReplace?: string;
   startIndex?: number;
   endIndex?: number;
   quote?: string;
@@ -89,10 +90,7 @@ export async function streamAgentMessage(
   request: AgentStreamRequest,
   handlers: AgentStreamHandlers = {}
 ): Promise<string> {
-  const apiUrl =
-    request.apiUrl ||
-    import.meta.env.VITE_API_URL ||
-    "/api";
+  const apiUrl = request.apiUrl || appConfig.apiBaseUrl;
 
   const response = await fetch(`${apiUrl}/chat/stream`, {
     method: "POST",
@@ -326,13 +324,4 @@ async function readHttpErrorMessage(
   } catch {
     return null;
   }
-}
-
-export function extractFirstDownloadUrl(
-  text: string
-): string | null {
-  const urlPattern = /(https?:\/\/[^\s)"'<>]+)/i;
-  const match = text.match(urlPattern);
-
-  return match?.[1] ?? null;
 }

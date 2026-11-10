@@ -13,7 +13,7 @@ import { BrowserRouter } from "react-router";
 import App from "./App";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { msalConfig } from "./config/authConfig";
-import { AppProvider } from "./contexts/AppContext";
+import { AgentConsoleProvider } from "./features/battlecard/state/AgentConsoleProvider";
 import { initTelemetry } from "./services/telemetry";
 
 import "./index.css";
@@ -59,13 +59,13 @@ msalInstance.initialize().then(() => {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <MsalProvider instance={msalInstance}>
-        <AppProvider>
+        <AgentConsoleProvider>
           <ThemeProvider>
             <BrowserRouter>
               <App />
             </BrowserRouter>
           </ThemeProvider>
-        </AppProvider>
+        </AgentConsoleProvider>
       </MsalProvider>
     </React.StrictMode>
   );

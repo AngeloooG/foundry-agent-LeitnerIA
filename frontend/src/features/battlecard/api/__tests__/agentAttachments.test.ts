@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { attachmentLimits } from "../../config/appConfig";
+import { attachmentLimits } from "../../../../config/appConfig";
 import { mergeAttachmentSelection } from "../agentAttachments";
 
 const MB = 1024 * 1024;
