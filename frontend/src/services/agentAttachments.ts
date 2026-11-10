@@ -4,6 +4,8 @@ import {
     validateFile,
 } from "../utils/fileAttachments";
 
+import { attachmentLimits } from "../config/appConfig";
+
 import type {
     AgentFileAttachment,
 } from "./agentStreamClient";
@@ -19,8 +21,9 @@ export interface AttachmentSelectionResult {
     rejectedMessages: string[];
 }
 
-const MAX_IMAGE_COUNT = 5;
-const MAX_DOCUMENT_COUNT = 10;
+const MAX_IMAGE_COUNT = attachmentLimits.maxImageCount;
+const MAX_DOCUMENT_COUNT = attachmentLimits.maxDocumentCount;
+const MAX_TOTAL_BYTES = attachmentLimits.maxTotalBytes;
 
 export function getFileIdentity(
     file: File
@@ -53,6 +56,12 @@ export function mergeAttachmentSelection(
     let documentCount =
         currentFiles.length - imageCount;
 
+    // Total size cap: all attachments travel in one request body (base64), which the backend limits.
+    let totalBytes = currentFiles.reduce(
+        (sum, file) => sum + file.size,
+        0
+    );
+
     for (const file of incomingFiles) {
         const identity = getFileIdentity(file);
 
@@ -69,6 +78,13 @@ export function mergeAttachmentSelection(
             rejectedMessages.push(
                 validation.error ||
                 `"${file.name}" no es válido.`
+            );
+            continue;
+        }
+
+        if (totalBytes + file.size > MAX_TOTAL_BYTES) {
+            rejectedMessages.push(
+                `"${file.name}" no se agregó. El total de adjuntos no puede superar ${formatMegabytes(MAX_TOTAL_BYTES)} MB.`
             );
             continue;
         }
@@ -98,6 +114,7 @@ export function mergeAttachmentSelection(
             documentCount += 1;
         }
 
+        totalBytes += file.size;
         existingIdentities.add(identity);
         acceptedFiles.push(file);
     }
@@ -160,8 +177,12 @@ export function removeAttachmentAt(
 
 export function formatAttachmentConstraints(): string {
     return [
-        "Imágenes: PNG, JPEG, GIF o WebP, hasta 5 MB por archivo.",
-        "Documentos: PDF, TXT, Markdown, CSV, JSON, HTML o XML, hasta 20 MB por archivo.",
-        "Máximo: 5 imágenes y 10 documentos.",
+        `Imágenes: PNG, JPEG, GIF o WebP, hasta ${formatMegabytes(attachmentLimits.maxImageBytes)} MB por archivo.`,
+        `Documentos: PDF, TXT, Markdown, CSV, JSON, HTML o XML, hasta ${formatMegabytes(attachmentLimits.maxDocumentBytes)} MB por archivo.`,
+        `Máximo: ${MAX_IMAGE_COUNT} imágenes y ${MAX_DOCUMENT_COUNT} documentos, ${formatMegabytes(MAX_TOTAL_BYTES)} MB en total.`,
     ].join(" ");
+}
+
+function formatMegabytes(bytes: number): string {
+    return String(Math.round(bytes / (1024 * 1024)));
 }

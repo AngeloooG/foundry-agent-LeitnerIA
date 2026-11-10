@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { SafeMarkdown } from "../components/markdown/SafeMarkdown";
 import { useAuth } from "../hooks/useAuth";
 import { useAgentConsoleState } from "../hooks/useAppState";
 
@@ -901,7 +900,7 @@ export default function AgentConsole() {
                                 key={message.id}
                                 className={`msg ${message.role}`}
                             >
-                                <MarkdownMessage content={message.text} />
+                                <SafeMarkdown content={message.text} />
                             </div>
                         ))}
 
@@ -2412,88 +2411,6 @@ export default function AgentConsole() {
       `}</style>
         </main>
     );
-}
-
-function MarkdownMessage({
-    content,
-}: {
-    content: string;
-}) {
-    return (
-        <div className="markdown-message">
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                    a({ href, children }) {
-                        if (!href) {
-                            return <>{children}</>;
-                        }
-
-                        const isGeneratedSharePointFile =
-                            isConseinSharePointUrl(href);
-
-                        return (
-                            <a
-                                className={
-                                    isGeneratedSharePointFile
-                                        ? "message-link message-link--generated-file"
-                                        : "message-inline-link"
-                                }
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={
-                                    isGeneratedSharePointFile
-                                        ? "Abrir archivo generado en SharePoint"
-                                        : href
-                                }
-                            >
-                                {isGeneratedSharePointFile
-                                    ? "Abrir archivo generado"
-                                    : children}
-                            </a>
-                        );
-                    },
-                    table({ children }) {
-                        return (
-                            <div className="markdown-table-block">
-                                <div
-                                    className="markdown-table-container"
-                                    role="region"
-                                    aria-label="Tabla de comparación desplazable"
-                                    tabIndex={0}
-                                >
-                                    <table className="markdown-table">
-                                        {children}
-                                    </table>
-                                </div>
-                                <small className="markdown-table-hint">
-                                    Desliza horizontalmente para ver todas las columnas.
-                                </small>
-                            </div>
-                        );
-                    },
-                }}
-            >
-                {content}
-            </ReactMarkdown>
-        </div>
-    );
-}
-
-
-function isConseinSharePointUrl(value: string): boolean {
-    try {
-        const parsedUrl = new URL(value);
-
-        return (
-            parsedUrl.protocol === "https:" &&
-            parsedUrl.hostname.toLowerCase() ===
-            "conseincloud.sharepoint.com"
-        );
-    } catch {
-        return false;
-    }
 }
 
 function formatFileSize(bytes: number): string {

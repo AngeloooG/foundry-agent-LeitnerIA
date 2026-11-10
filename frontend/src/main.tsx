@@ -69,4 +69,13 @@ msalInstance.initialize().then(() => {
       </MsalProvider>
     </React.StrictMode>
   );
+}).catch(() => {
+  // MSAL could not start (blocked storage, invalid configuration...). Show a minimal message instead of a
+  // blank page; textContent avoids injecting any HTML.
+  const rootElement = document.getElementById("root");
+  if (rootElement) {
+    rootElement.textContent =
+      "No se pudo iniciar la autenticación. Recargue la página o contacte a su administrador.";
+  }
+  console.error("MSAL initialization failed.");
 });

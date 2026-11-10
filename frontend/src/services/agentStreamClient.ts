@@ -305,7 +305,8 @@ async function readHttpErrorMessage(
     const contentType =
       response.headers.get("content-type") ?? "";
 
-    if (contentType.includes("application/json")) {
+    // Covers application/json and application/problem+json (RFC 7807 errors from the API)
+    if (contentType.includes("json")) {
       const body = (await response.json()) as {
         title?: string;
         detail?: string;

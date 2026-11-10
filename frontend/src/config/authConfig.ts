@@ -32,8 +32,10 @@ export const msalConfig: Configuration = {
     navigateToLoginRequestUrl: false, // Avoid redirect loops
   },
   cache: {
-    cacheLocation: "localStorage", // Use localStorage for token caching
-    storeAuthStateInCookie: false, // Set to true if IE11 support needed
+    // sessionStorage: tokens are scoped to the tab and cleared when it closes, which reduces the
+    // impact of an XSS (localStorage persists refresh tokens across sessions and tabs).
+    // Opening a new tab signs in silently through the Entra ID session cookie.
+    cacheLocation: "sessionStorage",
   },
   system: {
     loggerOptions: {

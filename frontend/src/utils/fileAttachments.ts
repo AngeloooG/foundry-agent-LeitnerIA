@@ -1,4 +1,5 @@
 import type { IFileAttachment } from '../types/chat';
+import { attachmentLimits } from '../config/appConfig';
 
 export interface FileConversionResult {
   name: string;
@@ -12,8 +13,8 @@ export interface FileValidationResult {
   error?: string;
 }
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB for images
-const MAX_DOCUMENT_SIZE = 20 * 1024 * 1024; // 20MB for documents
+const MAX_FILE_SIZE = attachmentLimits.maxImageBytes;
+const MAX_DOCUMENT_SIZE = attachmentLimits.maxDocumentBytes;
 const MAX_FILE_COUNT = 10; // Total attachments (images + documents)
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
 
