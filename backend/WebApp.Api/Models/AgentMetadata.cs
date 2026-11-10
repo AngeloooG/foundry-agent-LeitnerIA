@@ -1,23 +1,21 @@
 namespace WebApp.Api.Models;
 
 /// <summary>
-/// Agent metadata response model matching Azure sample pattern
+/// Public agent information returned by <c>GET /api/agent</c>.
 /// </summary>
+/// <remarks>
+/// Intentionally minimal: the system prompt (instructions), model deployment and raw metadata are internal
+/// configuration of CONSEIN and must never be exposed to end users.
+/// </remarks>
 public record AgentMetadataResponse
 {
     public required string Id { get; init; }
-    public required string Object { get; init; } = "agent";
-    public required long CreatedAt { get; init; }
     public required string Name { get; init; }
     public string? Description { get; init; }
-    public required string Model { get; init; }
-    public string? Instructions { get; init; }
-    public Dictionary<string, string>? Metadata { get; init; }
-    
+
     /// <summary>
     /// Starter prompts to display as suggestions in the chat interface.
     /// Populated from agent metadata key "starterPrompts" (newline-separated text).
-    /// Configure in Microsoft Foundry portal under agent Configuration > Starter prompts.
     /// </summary>
     public List<string>? StarterPrompts { get; init; }
 }

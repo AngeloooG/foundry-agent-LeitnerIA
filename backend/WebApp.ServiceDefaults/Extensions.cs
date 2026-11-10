@@ -89,16 +89,20 @@ public static class Extensions
         return builder;
     }
 
+    /// <summary>
+    /// Maps the health endpoints used by Container Apps probes. They are anonymous on purpose
+    /// (probes do not carry tokens) and only return "Healthy"/"Unhealthy", never diagnostic details.
+    /// </summary>
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        // Liveness endpoint
-        app.MapHealthChecks("/health");
+        // Overall health (all registered checks)
+        app.MapHealthChecks("/health").AllowAnonymous();
 
-        // Readiness endpoint
+        // Liveness: only the "live" checks (process is responsive)
         app.MapHealthChecks("/alive", new HealthCheckOptions
         {
             Predicate = r => r.Tags.Contains("live")
-        });
+        }).AllowAnonymous();
 
         return app;
     }

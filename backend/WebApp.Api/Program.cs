@@ -1,24 +1,33 @@
+using System.Security.Claims;
+using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Identity.Web;
 using WebApp.Api.Models;
+using WebApp.Api.Security;
 using WebApp.Api.Services;
-using System.Security.Claims;
 
-// Load .env file for local development BEFORE building the configuration
-// In production (Docker), Container Apps injects environment variables directly
+// Load .env file for local development BEFORE building the configuration.
+// Values already present in the environment win: in Azure, Container Apps injects the real configuration
+// and a stray .env file must never override it.
 var envFilePath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
 if (File.Exists(envFilePath))
 {
-    foreach (var line in File.ReadAllLines(envFilePath))
+    foreach (var rawLine in File.ReadAllLines(envFilePath))
     {
-        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
+        var line = rawLine.Trim();
+        if (line.Length == 0 || line.StartsWith('#'))
             continue;
+        if (line.StartsWith("export ", StringComparison.Ordinal))
+            line = line["export ".Length..];
 
         var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
-        if (parts.Length == 2)
+        if (parts.Length == 2 && parts[0].Length > 0 && Environment.GetEnvironmentVariable(parts[0]) is null)
         {
-            // Set as environment variables so they're picked up by configuration system
-            Environment.SetEnvironmentVariable(parts[0], parts[1]);
+            Environment.SetEnvironmentVariable(parts[0], parts[1].Trim('"', '\''));
         }
     }
 }
@@ -34,60 +43,45 @@ if (builder.Environment.IsDevelopment())
 // Add ServiceDefaults (telemetry, health checks)
 builder.AddServiceDefaults();
 
-// Add ProblemDetails service for standardized RFC 7807 error responses
+// RFC 7807 ProblemDetails + single exception-to-ProblemDetails mapping
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
-// Register IHttpContextAccessor for services that need access to the current HTTP request
 builder.Services.AddHttpContextAccessor();
 
-// Configure CORS for local development and production
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? new[] { "http://localhost:8080" };
+// Request body cap. Attachments travel as base64 inside the JSON body (≈ +33 %), so this is the effective
+// limit for all attachments of one message. Keep it aligned with the frontend total-size check.
+var maxRequestBodyMegabytes = builder.Configuration.GetValue("Limits:MaxRequestBodyMegabytes", 30);
+builder.WebHost.ConfigureKestrel(options =>
+    options.Limits.MaxRequestBodySize = maxRequestBodyMegabytes * 1024L * 1024L);
 
-builder.Services.AddCors(options =>
+// CORS is only needed in Development (Vite dev server on another port). In Azure the SPA is served by this
+// same app (same origin), so no cross-origin access is granted at all.
+const string DevCorsPolicy = "DevFrontend";
+if (builder.Environment.IsDevelopment())
 {
-    options.AddPolicy("AllowFrontend", policy =>
+    builder.Services.AddCors(options =>
     {
-        // In development, allow any localhost port for flexibility
-        if (builder.Environment.IsDevelopment())
-        {
-            policy.SetIsOriginAllowed(origin => 
-            {
-                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-                {
-                    return uri.Host == "localhost" || uri.Host == "127.0.0.1";
-                }
-                return false;
-            })
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials();
-        }
-        else
-        {
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyMethod()
-                  .AllowAnyHeader()
-                  .AllowCredentials();
-        }
+        options.AddPolicy(DevCorsPolicy, policy => policy
+            .SetIsOriginAllowed(origin =>
+                Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+                && (uri.Host == "localhost" || uri.Host == "127.0.0.1"))
+            .WithMethods("GET", "POST")
+            .WithHeaders("Authorization", "Content-Type"));
     });
-});
+}
 
-// Override ClientId and TenantId from environment variables if provided
-// These will be set by azd during deployment or by AppHost in local dev
+// Override ClientId and TenantId from environment variables if provided (set by azd / Container Apps)
 var clientId = builder.Configuration["ENTRA_SPA_CLIENT_ID"]
     ?? builder.Configuration["AzureAd:ClientId"];
-
 if (!string.IsNullOrEmpty(clientId))
 {
     builder.Configuration["AzureAd:ClientId"] = clientId;
-    // Set audience to match the expected token audience claim
     builder.Configuration["AzureAd:Audience"] = $"api://{clientId}";
 }
 
 var tenantId = builder.Configuration["ENTRA_TENANT_ID"]
     ?? builder.Configuration["AzureAd:TenantId"];
-
 if (!string.IsNullOrEmpty(tenantId))
 {
     builder.Configuration["AzureAd:TenantId"] = tenantId;
@@ -95,9 +89,10 @@ if (!string.IsNullOrEmpty(tenantId))
 
 const string RequiredScope = "Chat.ReadWrite";
 const string ScopePolicyName = "RequireChatScope";
+const string ChatRateLimitPolicy = "chat";
+const string ApiRateLimitPolicy = "api";
 
-// Add Microsoft Identity Web authentication
-// Validates JWT bearer tokens issued for the SPA's delegated scope
+// Microsoft Identity Web: validates JWT bearer tokens issued for the SPA's delegated scope
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(options =>
     {
@@ -105,7 +100,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         var configuredClientId = builder.Configuration["AzureAd:ClientId"];
         var backendClientId = builder.Configuration["ENTRA_BACKEND_CLIENT_ID"];
 
-        // When OBO is enabled, tokens are scoped to the backend API app
+        // Access tokens for the exposed API carry aud = api://{clientId} (v1) or {clientId} (v2).
+        // When OBO is enabled, tokens are scoped to the backend API app.
         var audiences = new List<string> { configuredClientId!, $"api://{configuredClientId}" };
         if (!string.IsNullOrEmpty(backendClientId))
         {
@@ -113,509 +109,280 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             audiences.Add($"api://{backendClientId}");
         }
         options.TokenValidationParameters.ValidAudiences = audiences;
-
         options.TokenValidationParameters.NameClaimType = ClaimTypes.Name;
         options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
     }, options => builder.Configuration.Bind("AzureAd", options));
 
-builder.Services.AddAuthorization(options =>
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy(ScopePolicyName, policy => policy
+        .RequireAuthenticatedUser()
+        .RequireScope(RequiredScope))
+    // Secure by default: any endpoint without explicit authorization metadata requires the API scope.
+    // Public endpoints (health probes, SPA fallback) opt out with AllowAnonymous().
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .RequireScope(RequiredScope)
+        .Build());
+
+// Per-user rate limiting (partitioned by Entra oid). Protects model cost and the Foundry quota.
+var chatPermitsPerMinute = builder.Configuration.GetValue("RateLimiting:ChatPermitsPerMinute", 20);
+var apiPermitsPerMinute = builder.Configuration.GetValue("RateLimiting:ApiPermitsPerMinute", 120);
+builder.Services.AddRateLimiter(options =>
 {
-    // Use Microsoft.Identity.Web's built-in scope validation
-    options.AddPolicy(ScopePolicyName, policy =>
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
     {
-        policy.RequireAuthenticatedUser();
-        policy.RequireScope(RequiredScope);
-    });
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            context.HttpContext.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+
+        await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails
+        {
+            Status = StatusCodes.Status429TooManyRequests,
+            Title = "Demasiadas solicitudes",
+            Detail = "Ha realizado demasiadas solicitudes en poco tiempo. Espere un momento e intente nuevamente."
+        }, options: null, contentType: "application/problem+json", cancellationToken);
+    };
+
+    static string PartitionKey(HttpContext context) =>
+        context.User.GetOwnerId() ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+
+    options.AddPolicy(ChatRateLimitPolicy, context => RateLimitPartition.GetSlidingWindowLimiter(
+        PartitionKey(context),
+        _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = chatPermitsPerMinute,
+            Window = TimeSpan.FromMinutes(1),
+            SegmentsPerWindow = 6,
+            QueueLimit = 0,
+        }));
+
+    options.AddPolicy(ApiRateLimitPolicy, context => RateLimitPartition.GetSlidingWindowLimiter(
+        PartitionKey(context),
+        _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = apiPermitsPerMinute,
+            Window = TimeSpan.FromMinutes(1),
+            SegmentsPerWindow = 6,
+            QueueLimit = 0,
+        }));
 });
 
-// Register Foundry Agent Service (v2 Agents API)
-// Uses Azure.AI.Projects SDK which works with v2 Agents API (/agents/ endpoint with human-readable IDs).
-builder.Services.AddHttpClient();
+// Foundry Agent Service (v2 Agents API) and background maintenance
 builder.Services.AddScoped<AgentFrameworkService>();
+builder.Services.AddHostedService<UploadedFilesCleanupService>();
 
 var app = builder.Build();
 
-// Add exception handling middleware for production
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler();
-}
-
-// Add status code pages for consistent error responses
+app.UseMiddleware<SecurityHeadersMiddleware>();
+app.UseExceptionHandler();
 app.UseStatusCodePages();
 
-// Map health checks
-app.MapDefaultEndpoints();
-
-// Serve static files from wwwroot (frontend)
+// Serve the SPA (wwwroot) before routing so static assets never hit authorization
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.UseCors("AllowFrontend");
+app.UseRouting();
+if (app.Environment.IsDevelopment())
+{
+    app.UseCors(DevCorsPolicy);
+}
 
-// Note: HTTPS redirection not needed - Azure Container Apps handles SSL termination at ingress
-// The container receives HTTP traffic on port 8080
-
-// Add authentication and authorization middleware
+// Note: HTTPS redirection not needed - Azure Container Apps terminates TLS at the ingress
+// (allowInsecure=false) and forwards HTTP to port 8080. HSTS is emitted by SecurityHeadersMiddleware.
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
-// Unauthenticated health endpoint for container probes
+// Health checks (/health, /alive) — anonymous, used by container probes
+app.MapDefaultEndpoints();
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
-.WithName("GetHealth");
+    .AllowAnonymous()
+    .WithName("GetHealth");
 
-// Streaming Chat endpoint: Streams agent response via SSE (conversationId → chunks → usage → done)
-// Supports MCP tool approval flow with previousResponseId and mcpApproval parameters
-app.MapPost("/api/chat/stream", async (
+var api = app.MapGroup("/api")
+    .RequireAuthorization(ScopePolicyName);
+
+// Streaming chat: SSE events conversationId → chunk/annotations/toolUse/mcpApprovalRequest → usage → done | error
+api.MapPost("/chat/stream", async (
     ChatRequest request,
     AgentFrameworkService agentService,
     HttpContext httpContext,
+    ILogger<Program> logger,
     IHostEnvironment environment,
     CancellationToken cancellationToken) =>
 {
+    var ownerId = httpContext.User.GetOwnerId();
+    if (ownerId is null)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Acceso denegado",
+            detail: "El token no identifica a un usuario.");
+
+    // 1) Validate everything before touching Azure (no conversation/file is created for invalid input)
+    var validation = ChatRequestValidator.Validate(request);
+    if (!validation.IsValid)
+    {
+        return Results.ValidationProblem(
+            validation.Errors,
+            title: "Solicitud inválida",
+            detail: string.Join(" ", validation.Errors.Values.SelectMany(v => v)));
+    }
+
+    // 2) Ownership: create a conversation for the caller or verify they own the one supplied
+    //    (ConversationNotFoundException → 404 via ApiExceptionHandler)
+    var conversationId = await agentService.ResolveConversationAsync(
+        ownerId, request.ConversationId, request.Message, cancellationToken);
+
+    // 3) Stream
+    var response = httpContext.Response;
+    response.ContentType = "text/event-stream";
+    response.Headers.CacheControl = "no-store";
+
     try
     {
-        httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
-        httpContext.Response.Headers.Append("Cache-Control", "no-cache");
-        httpContext.Response.Headers.Append("Connection", "keep-alive");
-
-        var conversationId = request.ConversationId
-            ?? await agentService.CreateConversationAsync(request.Message, cancellationToken);
-
-        await WriteConversationIdEvent(httpContext.Response, conversationId, cancellationToken);
+        await WriteSseEventAsync(response, new { type = "conversationId", conversationId }, cancellationToken);
 
         var startTime = DateTime.UtcNow;
-
         await foreach (var chunk in agentService.StreamMessageAsync(
             conversationId,
             request.Message,
-            request.ImageDataUris,
-            request.FileDataUris,
-            request.PreviousResponseId,
+            validation.Attachments,
             request.McpApproval,
             cancellationToken))
         {
-            if (chunk.IsText && chunk.TextDelta != null)
+            object? payload = chunk switch
             {
-                await WriteChunkEvent(httpContext.Response, chunk.TextDelta, cancellationToken);
-            }
-            else if (chunk.HasAnnotations && chunk.Annotations != null)
-            {
-                await WriteAnnotationsEvent(httpContext.Response, chunk.Annotations, cancellationToken);
-            }
-            else if (chunk.IsMcpApprovalRequest && chunk.McpApprovalRequest != null)
-            {
-                await WriteMcpApprovalRequestEvent(httpContext.Response, chunk.McpApprovalRequest, cancellationToken);
-            }
-            else if (chunk.IsToolUse && chunk.ToolName != null)
-            {
-                await WriteToolUseEvent(httpContext.Response, chunk.ToolName, cancellationToken);
-            }
+                { IsText: true, TextDelta: { } text } => new { type = "chunk", content = text },
+                { HasAnnotations: true, Annotations: { } annotations } => new
+                {
+                    type = "annotations",
+                    annotations = annotations.Select(a => new
+                    {
+                        type = a.Type,
+                        label = a.Label,
+                        url = a.Url,
+                        fileId = a.FileId,
+                        containerId = a.ContainerId,
+                        startIndex = a.StartIndex,
+                        endIndex = a.EndIndex,
+                        quote = a.Quote
+                    })
+                },
+                { IsMcpApprovalRequest: true, McpApprovalRequest: { } approval } => new
+                {
+                    type = "mcpApprovalRequest",
+                    approvalRequest = new
+                    {
+                        id = approval.Id,
+                        toolName = approval.ToolName,
+                        serverLabel = approval.ServerLabel,
+                        arguments = approval.Arguments,
+                        previousResponseId = approval.PreviousResponseId
+                    }
+                },
+                { IsToolUse: true, ToolName: { } toolName } => new { type = "toolUse", toolName },
+                _ => null
+            };
+
+            if (payload is not null)
+                await WriteSseEventAsync(response, payload, cancellationToken);
         }
 
-        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
         var usage = agentService.GetLastUsage();
-        await WriteUsageEvent(
-            httpContext.Response,
-            duration,
-            usage?.InputTokens ?? 0,
-            usage?.OutputTokens ?? 0,
-            usage?.TotalTokens ?? 0,
-            cancellationToken);
+        await WriteSseEventAsync(response, new
+        {
+            type = "usage",
+            duration = (DateTime.UtcNow - startTime).TotalMilliseconds,
+            promptTokens = usage?.InputTokens ?? 0,
+            completionTokens = usage?.OutputTokens ?? 0,
+            totalTokens = usage?.TotalTokens ?? 0
+        }, cancellationToken);
 
-        await WriteDoneEvent(httpContext.Response, cancellationToken);
+        await WriteSseEventAsync(response, new { type = "done" }, cancellationToken);
     }
-    catch (ArgumentException ex) when (ex.Message.Contains("Invalid") && (ex.Message.Contains("attachments") || ex.Message.Contains("image") || ex.Message.Contains("file")))
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
     {
-        // Validation errors from image/file processing - return 400 Bad Request
-        var errorResponse = ErrorResponseFactory.CreateFromException(
-            ex, 
-            400, 
-            environment.IsDevelopment());
-        
-        await WriteErrorEvent(
-            httpContext.Response, 
-            errorResponse.Detail ?? errorResponse.Title, 
-            cancellationToken);
+        // The user cancelled or closed the page: not an error, and the connection is gone.
+        logger.LogInformation("Chat stream cancelled by the client: {ConversationId}", conversationId);
     }
     catch (Exception ex)
     {
-        var logger = httpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Chat stream error: {Message}", ex.Message);
-        
-        var errorResponse = ErrorResponseFactory.CreateFromException(
-            ex, 
-            500, 
-            environment.IsDevelopment());
-        
-        await WriteErrorEvent(
-            httpContext.Response, 
-            errorResponse.Detail ?? errorResponse.Title, 
-            cancellationToken);
+        logger.LogError(ex, "Chat stream failed: {ConversationId}", conversationId);
+        var message = environment.IsDevelopment()
+            ? ex.Message
+            : "Ocurrió un error inesperado al generar la respuesta. Intente nuevamente.";
+        try
+        {
+            await WriteSseEventAsync(response, new { type = "error", message }, CancellationToken.None);
+        }
+        catch (Exception writeEx) when (writeEx is IOException or InvalidOperationException or OperationCanceledException)
+        {
+            // Connection already closed; nothing else to do.
+        }
     }
+
+    return Results.Empty;
 })
-.RequireAuthorization(ScopePolicyName)
+.RequireRateLimiting(ChatRateLimitPolicy)
 .WithName("StreamChatMessage");
 
-static async Task WriteConversationIdEvent(HttpResponse response, string conversationId, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new { type = "conversationId", conversationId });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
+// Public agent information for the UI (no system prompt, no model, no raw metadata)
+api.MapGet("/agent", async (AgentFrameworkService agentService, CancellationToken cancellationToken) =>
+        Results.Ok(await agentService.GetAgentMetadataAsync(cancellationToken)))
+    .RequireRateLimiting(ApiRateLimitPolicy)
+    .WithName("GetAgentMetadata");
 
-static async Task WriteChunkEvent(HttpResponse response, string content, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new { type = "chunk", content });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteToolUseEvent(HttpResponse response, string toolName, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new { type = "toolUse", toolName });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteAnnotationsEvent(HttpResponse response, List<WebApp.Api.Models.AnnotationInfo> annotations, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new
-    {
-        type = "annotations",
-        annotations = annotations.Select(a => new
-        {
-            type = a.Type,
-            label = a.Label,
-            url = a.Url,
-            fileId = a.FileId,
-            containerId = a.ContainerId,
-            textToReplace = a.TextToReplace,
-            startIndex = a.StartIndex,
-            endIndex = a.EndIndex,
-            quote = a.Quote
-        })
-    });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteMcpApprovalRequestEvent(HttpResponse response, WebApp.Api.Models.McpApprovalRequest approval, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new
-    {
-        type = "mcpApprovalRequest",
-        approvalRequest = new
-        {
-            id = approval.Id,
-            toolName = approval.ToolName,
-            serverLabel = approval.ServerLabel,
-            arguments = approval.Arguments,
-            previousResponseId = approval.PreviousResponseId
-        }
-    });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteUsageEvent(HttpResponse response, double duration, int promptTokens, int completionTokens, int totalTokens, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new
-    {
-        type = "usage",
-        duration,
-        promptTokens,
-        completionTokens,
-        totalTokens
-    });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteDoneEvent(HttpResponse response, CancellationToken ct)
-{
-    await response.WriteAsync("data: {\"type\":\"done\"}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteErrorEvent(HttpResponse response, string message, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new { type = "error", message });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-// Get agent metadata (name, description, model, metadata)
-// Used by frontend to display agent information in the UI
-app.MapGet("/api/agent", async (
+// The caller's conversations (filtered by owner)
+api.MapGet("/conversations", async (
     AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var metadata = await agentService.GetAgentMetadataAsync(cancellationToken);
-        return Results.Ok(metadata);
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(
-            ex, 
-            500, 
-            environment.IsDevelopment());
-        
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("GetAgentMetadata");
-
-// Get agent info (for debugging)
-app.MapGet("/api/agent/info", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var agentInfo = await agentService.GetAgentInfoAsync(cancellationToken);
-        return Results.Ok(new
-        {
-            info = agentInfo,
-            status = "ready"
-        });
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(
-            ex, 
-            500, 
-            environment.IsDevelopment());
-        
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("GetAgentInfo");
-
-// List conversations
-app.MapGet("/api/conversations", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
+    HttpContext httpContext,
     int? limit,
     CancellationToken cancellationToken) =>
 {
-    // MI mode: conversations are agent-scoped, not user-scoped.
-    // All authenticated users see all conversations for this agent.
-    // This is by-design — OBO mode (ENTRA_BACKEND_CLIENT_ID set) scopes per-user.
-    try
-    {
-        var pageSize = Math.Clamp(limit ?? 20, 1, 100);
-        var conversations = await agentService.ListConversationsAsync(pageSize, cancellationToken);
-        var hasMore = conversations.Count > pageSize;
-        if (hasMore)
-            conversations = conversations.Take(pageSize).ToList();
-        return Results.Ok(new { conversations, hasMore });
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
+    var ownerId = httpContext.User.GetOwnerId();
+    if (ownerId is null)
+        return Results.Forbid();
+
+    var pageSize = Math.Clamp(limit ?? 20, 1, 100);
+    var conversations = await agentService.ListConversationsAsync(ownerId, pageSize, cancellationToken);
+    var hasMore = conversations.Count > pageSize;
+    return Results.Ok(new { conversations = conversations.Take(pageSize), hasMore });
 })
-.RequireAuthorization(ScopePolicyName)
+.RequireRateLimiting(ApiRateLimitPolicy)
 .WithName("ListConversations");
 
-// Get conversation messages
-app.MapGet("/api/conversations/{conversationId}/messages", async (
+// Messages of a conversation owned by the caller (404 otherwise)
+api.MapGet("/conversations/{conversationId}/messages", async (
     string conversationId,
     AgentFrameworkService agentService,
-    IHostEnvironment environment,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
-    try
-    {
-        var messages = await agentService.GetConversationMessagesAsync(conversationId, cancellationToken);
-        return Results.Ok(messages);
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
+    var ownerId = httpContext.User.GetOwnerId();
+    if (ownerId is null)
+        return Results.Forbid();
+    if (!ChatRequestValidator.IsValidId(conversationId))
+        return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Solicitud inválida",
+            detail: "Identificador de conversación inválido.");
+
+    return Results.Ok(await agentService.GetConversationMessagesAsync(ownerId, conversationId, cancellationToken));
 })
-.RequireAuthorization(ScopePolicyName)
+.RequireRateLimiting(ApiRateLimitPolicy)
 .WithName("GetConversationMessages");
 
-// Delete conversation
-app.MapDelete("/api/conversations/{conversationId}", async (
-    string conversationId,
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        await agentService.DeleteConversationAsync(conversationId, cancellationToken);
-        return Results.NoContent();
-    }
-    catch (NotSupportedException)
-    {
-        return Results.Problem(
-            title: "Not Implemented",
-            detail: "Conversation deletion is not yet supported by the Azure.AI.Projects SDK.",
-            statusCode: 501
-        );
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("DeleteConversation");
+// Unknown API routes are a real 404 (not the SPA's index.html)
+app.MapFallback("/api/{**path}", () => Results.Problem(
+        statusCode: StatusCodes.Status404NotFound, title: "No encontrado", detail: "El recurso solicitado no existe."))
+    .AllowAnonymous();
 
-// File download endpoint for code interpreter outputs
-app.MapGet("/api/files/{fileId}", async (
-    string fileId,
-    string? containerId,
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var (content, fileName) = await agentService.DownloadFileAsync(fileId, containerId, cancellationToken);
-        var contentType = GetMimeType(fileName);
-        return Results.File(content.ToArray(), contentType, fileName);
-    }
-    catch (HttpRequestException httpEx)
-    {
-        var statusCode = (int?)httpEx.StatusCode ?? 502;
-        var errorResponse = ErrorResponseFactory.CreateFromException(httpEx, statusCode, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("DownloadFile");
-
-// Uploaded-files cleanup endpoints — inspect & delete image files previously uploaded by
-// this web app. Uses the WebAppUploadFilenamePrefix tag applied on upload to scope the
-// operation to our own files, because the Foundry Files API does not expose a typed
-// expires_after parameter in the GA SDK (see README "Known limitations").
-app.MapGet("/api/files/uploaded", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var info = await agentService.ListUploadedFilesAsync(cancellationToken);
-        return Results.Ok(info);
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("ListUploadedFiles");
-
-app.MapPost("/api/files/cleanup", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var result = await agentService.CleanupUploadedFilesAsync(cancellationToken);
-        return Results.Ok(result);
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("CleanupUploadedFiles");
-
-// Fallback route for SPA - serve index.html for any non-API routes
-app.MapFallbackToFile("index.html");
+// SPA fallback: deep links such as /agente return index.html (public; the SPA handles sign-in)
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
-// Helper to determine MIME type from file extension
-static string GetMimeType(string fileName)
+static async Task WriteSseEventAsync(HttpResponse response, object payload, CancellationToken cancellationToken)
 {
-    var ext = Path.GetExtension(fileName).ToLowerInvariant();
-    return ext switch
-    {
-        ".png" => "image/png",
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".gif" => "image/gif",
-        ".webp" => "image/webp",
-        ".svg" => "image/svg+xml",
-        ".pdf" => "application/pdf",
-        ".csv" => "text/csv",
-        ".json" => "application/json",
-        ".txt" => "text/plain",
-        ".md" => "text/markdown",
-        ".html" => "text/html",
-        ".py" => "text/x-python",
-        ".js" => "text/javascript",
-        _ => "application/octet-stream",
-    };
+    await response.WriteAsync($"data: {JsonSerializer.Serialize(payload)}\n\n", cancellationToken);
+    await response.Body.FlushAsync(cancellationToken);
 }
+
+/// <summary>Entry point marker used by WebApplicationFactory in integration tests.</summary>
+public partial class Program;
