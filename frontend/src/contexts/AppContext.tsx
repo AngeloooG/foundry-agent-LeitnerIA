@@ -1,9 +1,9 @@
-import { createContext, useContext, useReducer, useEffect, useMemo } from 'react';
-import type { ReactNode, Dispatch } from 'react';
-import { useMsal } from '@azure/msal-react';
-import type { AppState, AppAction } from '../types/appState';
-import { initialAppState } from '../types/appState';
-import { appReducer } from '../reducers/appReducer';
+import { createContext, useContext, useMemo, useReducer } from "react";
+import type { Dispatch, ReactNode } from "react";
+
+import { appReducer } from "../reducers/appReducer";
+import type { AppAction, AppState } from "../types/appState";
+import { initialAppState } from "../types/appState";
 
 interface AppContextValue {
   state: AppState;
@@ -12,83 +12,13 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
-// Lightweight dev logger prevents accidental prod noise
-const devLogger = {
-  enabled: import.meta.env.DEV,
-  group(label: string) { if (this.enabled) console.group(label); },
-  log: function (...args: unknown[]) { if (this.enabled) console.log(...args); },
-  end() { if (this.enabled) console.groupEnd(); }
-};
-
-// Dev mode logging middleware (diff-based)
-const logStateChange = (action: AppAction, prevState: AppState, nextState: AppState) => {
-  if (!devLogger.enabled) return;
-  const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-  devLogger.group(`🔄 [${timestamp}] ${action.type}`);
-  devLogger.log('Action:', action);
-  const changes: Record<string, unknown> = {};
-  
-  // Track all meaningful state changes
-  if (prevState.auth.status !== nextState.auth.status) {
-    changes['auth.status'] = `${prevState.auth.status} → ${nextState.auth.status}`;
-  }
-  if (prevState.chat.status !== nextState.chat.status) {
-    changes['chat.status'] = `${prevState.chat.status} → ${nextState.chat.status}`;
-  }
-  if (prevState.chat.messages.length !== nextState.chat.messages.length) {
-    changes['chat.messages.length'] = `${prevState.chat.messages.length} → ${nextState.chat.messages.length}`;
-  }
-  if (prevState.chat.streamingMessageId !== nextState.chat.streamingMessageId) {
-    changes['chat.streamingMessageId'] = `${prevState.chat.streamingMessageId} → ${nextState.chat.streamingMessageId}`;
-  }
-  if (prevState.ui.chatInputEnabled !== nextState.ui.chatInputEnabled) {
-    changes['ui.chatInputEnabled'] = `${prevState.ui.chatInputEnabled} → ${nextState.ui.chatInputEnabled}`;
-  }
-  if (prevState.conversations.sidebarOpen !== nextState.conversations.sidebarOpen) {
-    changes['conversations.sidebarOpen'] = `${prevState.conversations.sidebarOpen} → ${nextState.conversations.sidebarOpen}`;
-  }
-  if (prevState.conversations.list.length !== nextState.conversations.list.length) {
-    changes['conversations.list.length'] = `${prevState.conversations.list.length} → ${nextState.conversations.list.length}`;
-  }
-  
-  if (Object.keys(changes).length) {
-    devLogger.log('Changes:', changes);
-  } else {
-    devLogger.log('(No state changes)');
-  }
-  devLogger.end();
-};
-
 /**
- * Enhanced reducer with logging middleware
+ * Provides the global application state. Mounted once in main.tsx, so its state survives route changes.
+ * No logging middleware: actions carry user-entered business content and must not reach the console.
  */
-const reducerWithLogging = (state: AppState, action: AppAction): AppState => {
-  const nextState = appReducer(state, action);
-  logStateChange(action, state, nextState);
-  return nextState;
-};
-
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(reducerWithLogging, initialAppState);
-  const { accounts } = useMsal();
-
-  // Initialize auth state from MSAL
-  useEffect(() => {
-    if (accounts.length > 0) {
-      dispatch({ type: 'AUTH_INITIALIZED', user: accounts[0] });
-    }
-  }, [accounts]);
-
-  // Dev mode: Log when provider mounts and unmounts
-  useEffect(() => {
-    devLogger.log('🚀 AppProvider initialized');
-    return () => {
-      devLogger.log('🔌 AppProvider unmounted');
-    };
-  }, []);
-
-  // Memoize context value to prevent unnecessary re-renders
-  const contextValue = useMemo(() => ({ state, dispatch }), [state, dispatch]);
+  const [state, dispatch] = useReducer(appReducer, initialAppState);
+  const contextValue = useMemo(() => ({ state, dispatch }), [state]);
 
   return (
     <AppContext.Provider value={contextValue}>
@@ -98,14 +28,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 };
 
 /**
- * Hook to access app state and dispatch
- * Throws error if used outside AppProvider
+ * Hook to access app state and dispatch. Throws if used outside AppProvider.
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export const useAppContext = () => {
   const context = useContext(AppContext);
   if (!context) {
-    throw new Error('useAppContext must be used within AppProvider');
+    throw new Error("useAppContext must be used within AppProvider");
   }
   return context;
 };

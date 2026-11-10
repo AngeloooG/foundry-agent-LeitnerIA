@@ -1,4 +1,3 @@
-import type { IFileAttachment } from '../types/chat';
 import { attachmentLimits } from '../config/appConfig';
 
 export interface FileConversionResult {
@@ -15,7 +14,6 @@ export interface FileValidationResult {
 
 const MAX_FILE_SIZE = attachmentLimits.maxImageBytes;
 const MAX_DOCUMENT_SIZE = attachmentLimits.maxDocumentBytes;
-const MAX_FILE_COUNT = 10; // Total attachments (images + documents)
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
 
 // Note: Office documents (docx, pptx, xlsx) are NOT supported by Azure Responses API.
@@ -134,26 +132,6 @@ export function validateFile(file: File): FileValidationResult {
 }
 
 /**
- * Validate multiple files for count and individual file requirements.
- * 
- * @param files - Files to validate
- * @param currentFileCount - Number of files already attached
- * @returns Validation result with error message if invalid
- */
-export function validateFileCount(files: File[], currentFileCount: number = 0): FileValidationResult {
-  const totalCount = currentFileCount + files.length;
-  
-  if (totalCount > MAX_FILE_COUNT) {
-    return { 
-      valid: false, 
-      error: `Maximum ${MAX_FILE_COUNT} files allowed. You have ${currentFileCount} attached and are trying to add ${files.length} more` 
-    };
-  }
-
-  return { valid: true };
-}
-
-/**
  * Convert a single file to base64 data URI with correct MIME type.
  * The browser's FileReader may embed incorrect MIME types, so we rebuild
  * the data URI with the effective MIME type.
@@ -216,20 +194,4 @@ export async function convertFilesToDataUris(
   }
 
   return results;
-}
-
-/**
- * Create chat attachment metadata from file conversion results.
- * 
- * @param results - File conversion results
- * @returns Array of attachment objects for chat UI
- */
-export function createAttachmentMetadata(
-  results: FileConversionResult[]
-): IFileAttachment[] {
-  return results.map((result) => ({
-    fileName: result.name,
-    fileSizeBytes: result.sizeBytes,
-    dataUri: result.dataUri,
-  }));
 }

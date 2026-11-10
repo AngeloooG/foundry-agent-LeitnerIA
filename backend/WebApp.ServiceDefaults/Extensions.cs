@@ -18,16 +18,9 @@ public static class Extensions
 
         builder.AddDefaultHealthChecks();
 
-        builder.Services.AddServiceDiscovery();
-
-        builder.Services.ConfigureHttpClientDefaults(http =>
-        {
-            // Turn on resilience by default
-            http.AddStandardResilienceHandler();
-
-            // Turn on service discovery by default
-            http.AddServiceDiscovery();
-        });
+        // Resilience (retries, timeouts, circuit breaker) for HttpClient instances created via IHttpClientFactory.
+        // Service discovery is not used: there is no Aspire AppHost in this solution.
+        builder.Services.ConfigureHttpClientDefaults(http => http.AddStandardResilienceHandler());
 
         return builder;
     }

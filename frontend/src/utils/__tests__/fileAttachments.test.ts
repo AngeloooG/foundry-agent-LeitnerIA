@@ -3,7 +3,6 @@ import {
   validateImageFile,
   validateDocumentFile,
   validateFile,
-  validateFileCount,
   getEffectiveMimeType,
   convertFilesToDataUris,
 } from '../fileAttachments';
@@ -199,46 +198,6 @@ describe('validateFile', () => {
 
     expect(result.valid).toBe(false);
     expect(result.error).toContain('not a supported file type');
-  });
-});
-
-describe('validateFileCount', () => {
-  it('accepts files within limit', () => {
-    const files = [
-      createMockFile('1.png', 'image/png', 100),
-      createMockFile('2.png', 'image/png', 100),
-    ];
-    const result = validateFileCount(files, 0);
-    expect(result.valid).toBe(true);
-  });
-
-  it('considers existing file count', () => {
-    const files = [createMockFile('new.png', 'image/png', 100)];
-    const result = validateFileCount(files, 9);
-    expect(result.valid).toBe(true);
-  });
-
-  it('rejects when total exceeds 10 files', () => {
-    const files = [
-      createMockFile('1.png', 'image/png', 100),
-      createMockFile('2.png', 'image/png', 100),
-    ];
-    const result = validateFileCount(files, 9);
-
-    expect(result.valid).toBe(false);
-    expect(result.error).toContain('Maximum 10 files');
-  });
-
-  it('provides helpful error message with counts', () => {
-    const files = [
-      createMockFile('1.png', 'image/png', 100),
-      createMockFile('2.png', 'image/png', 100),
-      createMockFile('3.png', 'image/png', 100),
-    ];
-    const result = validateFileCount(files, 8);
-
-    expect(result.error).toContain('8 attached');
-    expect(result.error).toContain('3 more');
   });
 });
 
