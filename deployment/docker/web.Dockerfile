@@ -45,7 +45,9 @@ COPY backend/WebApp.ServiceDefaults/WebApp.ServiceDefaults.csproj ./backend/WebA
 RUN dotnet restore backend/WebApp.Api/WebApp.Api.csproj
 
 COPY backend/ ./backend/
-RUN dotnet publish backend/WebApp.Api/WebApp.Api.csproj -c Release -o /app/publish --no-restore
+# No --no-restore: publish re-validates the restore graph inside the container, so a stray local obj/ folder can
+# never be used (the restore layer above keeps it fast).
+RUN dotnet publish backend/WebApp.Api/WebApp.Api.csproj -c Release -o /app/publish
 
 # ---------------------------------------------------------------- Stage 3: runtime
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine

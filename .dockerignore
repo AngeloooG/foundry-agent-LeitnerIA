@@ -9,11 +9,11 @@ out
 build
 **/dist
 dist
-bin
-obj
-**/bin/
-**/obj/
-**/build/
+# No trailing slash: "**/obj/" does not match in the ACR (classic) builder, which copied local obj/ folders with
+# Windows restore paths into the image and broke "dotnet publish".
+**/bin
+**/obj
+**/build
 
 # Testing
 coverage
