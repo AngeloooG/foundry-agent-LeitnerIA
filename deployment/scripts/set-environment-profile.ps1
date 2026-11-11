@@ -42,7 +42,6 @@ $profiles = @{
         LOG_DAILY_QUOTA_GB               = "1"
         CONTAINER_REGISTRY_SKU           = "Basic"
         ENABLE_ENTRA_TELEMETRY_AUTH      = "false"
-        ENTRA_REQUIRE_USER_ASSIGNMENT    = "true"
         ENTRA_ALLOW_LOCALHOST_REDIRECTS  = "true"
     }
     prod = [ordered]@{
@@ -54,7 +53,6 @@ $profiles = @{
         LOG_DAILY_QUOTA_GB               = "-1"
         CONTAINER_REGISTRY_SKU           = "Basic"
         ENABLE_ENTRA_TELEMETRY_AUTH      = "true"
-        ENTRA_REQUIRE_USER_ASSIGNMENT    = "true"
         ENTRA_ALLOW_LOCALHOST_REDIRECTS  = "false"
     }
 }
@@ -75,6 +73,7 @@ $ipJson = ConvertTo-Json -InputObject @($AllowedIpRanges) -Compress
 azd env set INGRESS_ALLOWED_IP_RANGES $ipJson | Out-Null
 Write-Host ("  {0,-34} = {1}" -f "INGRESS_ALLOWED_IP_RANGES", $ipJson)
 
+# Access is tenant-wide by default. ENTRA_ALLOWED_GROUP_ID (optional) is left untouched by this script.
 if ($Profile -eq "prod" -and $AllowedIpRanges.Count -eq 0) {
     Write-Host "[INFO] Ingress is reachable from any IP (sign-in still required). Consider -AllowedIpRanges." -ForegroundColor Yellow
 }

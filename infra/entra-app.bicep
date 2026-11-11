@@ -9,8 +9,11 @@ param serviceManagementReference string = ''
 @description('Enable OBO backend API app registration for user-delegated access to Agent Service')
 param enableObo bool = false
 
-@description('Only users/groups assigned to the enterprise application can sign in (appRoleAssignmentRequired)')
-param requireUserAssignment bool = true
+@description('Optional security group (object id). When set, the access token carries the groups claim and the API only authorizes its members. Empty = every user of the tenant.')
+param allowedGroupId string = ''
+
+// Emit the groups claim only when the optional group restriction is configured.
+var groupMembershipClaims = empty(allowedGroupId) ? 'None' : 'SecurityGroup'
 
 // ============================================================================
 // Well-known first-party app IDs and scope IDs (stable across all Entra tenants)
@@ -32,7 +35,9 @@ var chatReadWriteScopeId = guid(resourceGroup().id, environmentName, 'Chat.ReadW
 resource app 'Microsoft.Graph/applications@v1.0' = {
   uniqueName: 'ai-foundry-agent-${environmentName}'
   displayName: 'ai-foundry-agent-${environmentName}'
+  // Single-tenant: only accounts of this directory (members and B2B guests) can obtain tokens.
   signInAudience: 'AzureADMyOrg'
+  groupMembershipClaims: groupMembershipClaims
   serviceManagementReference: empty(serviceManagementReference) ? null : serviceManagementReference
   spa: {
     redirectUris: [
@@ -60,10 +65,9 @@ resource app 'Microsoft.Graph/applications@v1.0' = {
 
 resource sp 'Microsoft.Graph/servicePrincipals@v1.0' = {
   appId: app.appId
-  // Without this, every user in the tenant can sign in and consume model tokens.
-  // Assign users or a security group in Entra ID > Enterprise applications > Users and groups
-  // (postprovision assigns ENTRA_ALLOWED_GROUP_ID and the deploying user).
-  appRoleAssignmentRequired: requireUserAssignment
+  // Access decision (CONSEIN): every authenticated user of the tenant may use the app, so assignment is not required.
+  // Authorization is enforced by the API (tenant-pinned token validation + scope + optional ENTRA_ALLOWED_GROUP_ID).
+  appRoleAssignmentRequired: false
 }
 
 // ============================================================================
@@ -76,6 +80,8 @@ resource backendApp 'Microsoft.Graph/applications@v1.0' = if (enableObo) {
   uniqueName: 'ai-foundry-agent-backend-${environmentName}'
   displayName: 'ai-foundry-agent-backend-${environmentName}'
   signInAudience: 'AzureADMyOrg'
+  // With OBO the access token targets this app, so it must also carry the groups claim when the restriction is on.
+  groupMembershipClaims: groupMembershipClaims
   serviceManagementReference: empty(serviceManagementReference) ? null : serviceManagementReference
   web: {
     redirectUris: []

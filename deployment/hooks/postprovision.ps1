@@ -191,41 +191,14 @@ if ($webIdentityPrincipalId -and $aiFoundryResourceGroup -and $aiFoundryResource
     Write-Host "  Requires AI_FOUNDRY_RESOURCE_GROUP, AI_FOUNDRY_RESOURCE_NAME and AI_AGENT_ENDPOINT (.../api/projects/<name>)" -ForegroundColor Gray
 }
 
-# User assignment: the enterprise app requires assignment (requireUserAssignment=true in Bicep).
-# Assign the deploying user (avoids locking yourself out) and, optionally, a security group (e.g. sales team).
-$spaSpObjectId = az ad sp show --id $clientId --query "id" -o tsv 2>$null
-$defaultAccessRoleId = "00000000-0000-0000-0000-000000000000"
-$principalsToAssign = @()
-$signedInUserId = az ad signed-in-user show --query "id" -o tsv 2>$null
-if ($signedInUserId) { $principalsToAssign += $signedInUserId }
-$allowedGroupId = azd env get-value ENTRA_ALLOWED_GROUP_ID 2>$null
-if ($allowedGroupId -and $allowedGroupId -notmatch 'ERROR') { $principalsToAssign += $allowedGroupId.Trim() }
-
-if ($spaSpObjectId) {
-    $assigned = @(az rest --method GET --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spaSpObjectId/appRoleAssignedTo" --query "value[].principalId" -o tsv 2>$null)
-    foreach ($principalId in $principalsToAssign) {
-        if ($assigned -contains $principalId) {
-            Write-Host "[OK] App assignment exists for $principalId" -ForegroundColor Green
-            continue
-        }
-        $assignmentBody = @{ principalId = $principalId; resourceId = $spaSpObjectId; appRoleId = $defaultAccessRoleId } | ConvertTo-Json
-        $assignmentFile = [System.IO.Path]::GetTempFileName()
-        try {
-            $assignmentBody | Out-File -FilePath $assignmentFile -Encoding utf8
-            az rest --method POST --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spaSpObjectId/appRoleAssignedTo" `
-                --headers "Content-Type=application/json" --body "@$assignmentFile" 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] Assigned $principalId to the LeitnerIA enterprise app" -ForegroundColor Green
-            } else {
-                Write-Host "[WARN] Could not assign $principalId (requires Application Administrator or app owner)" -ForegroundColor Yellow
-            }
-        } finally {
-            Remove-Item $assignmentFile -ErrorAction SilentlyContinue
-        }
-    }
-    if (-not $allowedGroupId) {
-        Write-Host "[INFO] To grant access to the sales team: azd env set ENTRA_ALLOWED_GROUP_ID <group-object-id>" -ForegroundColor Gray
-    }
+# Access model: every authenticated user of the tenant (Assignment required = No, set by Bicep).
+# No users or groups are assigned here. The optional ENTRA_ALLOWED_GROUP_ID restriction is enforced by the API
+# from the token's groups claim (Bicep enables groupMembershipClaims when it is set).
+$allowedGroupId = (azd env get-value ENTRA_ALLOWED_GROUP_ID 2>$null) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($allowedGroupId)) {
+    Write-Host "[INFO] Access: every authenticated user of the tenant (including B2B guests of the directory)" -ForegroundColor Gray
+} else {
+    Write-Host "[INFO] Access: tenant users who are members of group $allowedGroupId (enforced by the API)" -ForegroundColor Gray
 }
 
 # Generate local dev config files (moved from preprovision — clientId comes from Bicep)

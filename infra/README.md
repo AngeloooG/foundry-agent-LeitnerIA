@@ -14,7 +14,7 @@ Infraestructura como código con Bicep, desplegada con Azure Developer CLI. Las 
 | Container Apps Environment | `cae-<token>` | `core/host/container-apps-environment.bicep` | Consumption, sin VNet |
 | Managed identity (user-assigned) | `id-web-<token>` | `main-infrastructure.bicep` | `isolationScope: Regional` |
 | Container App | `ca-web-<token>` | `core/host/container-app.bicep` | SPA + API, puerto 8080, sondas `/api/health` |
-| App Entra (SPA + API) | `ai-foundry-agent-<entorno>` | `entra-app.bicep` | Scope `Chat.ReadWrite`, **asignación de usuarios requerida** |
+| App Entra (SPA + API) | `ai-foundry-agent-<entorno>` | `entra-app.bicep` | Single-tenant, scope `Chat.ReadWrite`, sin asignación requerida; claim `groups` solo si hay grupo configurado |
 | App Entra backend (OBO) | `ai-foundry-agent-backend-<entorno>` | ídem | Solo con `ENABLE_OBO=true` |
 
 **Fuera de este Bicep**, configurados con hooks o de forma manual:
@@ -39,9 +39,8 @@ Se configuran como variables de azd (`azd env set NOMBRE valor`), que `main.para
 | `LOG_DAILY_QUOTA_GB` | -1 | 1 | -1 | Tope de ingesta diaria (protege el presupuesto) |
 | `CONTAINER_REGISTRY_SKU` | Basic | Basic | Basic | Premium solo si se necesitan private endpoints |
 | `ENABLE_ENTRA_TELEMETRY_AUTH` | false | false | true | Deshabilita la ingesta por clave en el App Insights del backend y concede Monitoring Metrics Publisher a la identidad |
-| `ENTRA_REQUIRE_USER_ASSIGNMENT` | true | true | true | Solo usuarios o grupos asignados pueden entrar |
 | `ENTRA_ALLOW_LOCALHOST_REDIRECTS` | (vacío = no) | true | false | Redirect URIs `http://localhost` (solo para desarrollo) |
-| `ENTRA_ALLOWED_GROUP_ID` | (vacío) | opcional | grupo de ventas | Grupo que `postprovision` asigna a la app |
+| `ENTRA_ALLOWED_GROUP_ID` | (vacío) | (vacío) | opcional | Vacío = todos los usuarios del tenant. Con un GUID de grupo, la API solo autoriza a sus miembros (claim `groups`). `preprovision` y la API rechazan un valor que no sea GUID |
 | `AI_FOUNDRY_RESOURCE_NAME` / `AI_FOUNDRY_PROJECT_NAME` | (descubre) | | | Obligatorios si hay más de una cuenta o proyecto |
 | `AI_AGENT_ID` / `AI_AGENT_VERSION` | | | | Agente y versión fija (opcional) |
 | `REMOVE_LEGACY_FOUNDRY_ROLES` | false | | true tras verificar | Retira los 3 roles amplios anteriores |
@@ -87,7 +86,7 @@ azd provision --preview                                         # what-if
 - Cero secretos: pull de ACR, acceso a Foundry y OBO con managed identity y credencial federada. El usuario admin de ACR está deshabilitado.
 - Ingress solo HTTPS (`allowInsecure: false`); el contenedor se ejecuta como usuario no root.
 - Rol único "Foundry User" (id `53ca6127-…`, antes llamado "Azure AI User"), limitado al **proyecto**. Sustituye a Cognitive Services User, Cognitive Services OpenAI Contributor y Azure AI Developer a nivel de cuenta.
-- La app de Entra exige asignación de usuarios. Las redirect URIs de localhost solo están en entornos de desarrollo.
+- App de Entra single-tenant sin asignación requerida: la autorización la hace la API (issuer y `tid` del tenant, audiencia, firma, expiración, scope y grupo opcional). Las redirect URIs de localhost solo existen si `ENTRA_ALLOW_LOCALHOST_REDIRECTS=true`.
 - Las connection strings de App Insights son secretos de Container Apps; la ingesta del backend puede autenticarse con Entra ID.
 - La lista de IPs del ingress está disponible.
 
@@ -120,6 +119,7 @@ Son precios orientativos: confírmelos en la [calculadora de precios de Azure](h
 | Síntoma | Causa probable | Acción |
 |---|---|---|
 | La revisión no arranca (falla la startup probe) | Configuración inválida: la API valida al arrancar | Revise los logs del contenedor: el mensaje indica qué variable falta |
-| 401/403 en `/api` | Token sin scope o usuario no asignado | Asigne al usuario o al grupo en *Enterprise applications* |
+| 401 en `/api` | Token de otro tenant, audiencia incorrecta o expirado | Revise `ENTRA_TENANT_ID` / `ENTRA_SPA_CLIENT_ID` y el scope que pide la SPA |
+| 403 en `/api` | Falta el scope o, con `ENTRA_ALLOWED_GROUP_ID`, el usuario no es miembro del grupo (o tiene más de 200 grupos) | Añada al usuario al grupo, o vacíe la variable para acceso de todo el tenant |
 | 403 de Foundry en los logs | Rol no propagado o en otra cuenta | Verifique "Foundry User" en el proyecto de `AI_AGENT_ENDPOINT` (la propagación tarda unos minutos) |
 | "Multiple AI Foundry resources" | Hay varias cuentas o proyectos | `azd env set AI_FOUNDRY_RESOURCE_NAME` / `AI_FOUNDRY_PROJECT_NAME` |

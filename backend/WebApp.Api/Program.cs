@@ -19,7 +19,7 @@ if (builder.Environment.IsDevelopment())
 builder.AddServiceDefaults(); // OpenTelemetry (Application Insights), health checks, HttpClient resilience
 builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddMeter(ChatMetrics.MeterName));
 
-builder.Services.AddProblemDetails();
+builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = ApiProblemDetails.LocalizeAuthErrors);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
 // Request body cap. Attachments travel as base64 inside the JSON body (≈ +33 %), so this bounds all the

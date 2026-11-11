@@ -35,7 +35,7 @@ WebApp.Api.Tests/                 Pruebas unitarias y de integración (WebApplic
 | `GET /api/conversations/{id}/messages` | Mensajes de una conversación propia |
 | `GET /api/health`, `/health`, `/alive` | Sondas (anónimas) |
 
-Todos los endpoints `/api` excepto `/api/health` requieren el scope `Chat.ReadWrite`. Los endpoints que existían en la plantilla, `/api/files/*`, `/api/agent/info` y `DELETE /api/conversations/{id}`, se eliminaron porque exponían archivos o acciones de todos los usuarios.
+Todos los endpoints `/api` excepto `/api/health` exigen un token del tenant configurado con el scope `Chat.ReadWrite` y, si `ENTRA_ALLOWED_GROUP_ID` tiene valor, pertenecer a ese grupo. Las reglas están en `Security/` (`EntraOptions`, `EntraTokenValidation`, `CorporateAccessAuthorization`). Los endpoints que existían en la plantilla, `/api/files/*`, `/api/agent/info` y `DELETE /api/conversations/{id}`, se eliminaron porque exponían archivos o acciones de todos los usuarios.
 
 ## Configuración
 
@@ -50,6 +50,7 @@ Variables de entorno, que inyecta azd o Container Apps (en local, las escribe en
 | `AI_AGENT_VERSION` | No | Versión fija del agente (por defecto, la más reciente) |
 | `MANAGED_IDENTITY_CLIENT_ID` | En Azure | Identidad user-assigned |
 | `ENTRA_BACKEND_CLIENT_ID` | No | Activa On-Behalf-Of |
+| `ENTRA_ALLOWED_GROUP_ID` | No | Restricción opcional por grupo (object id). Vacío = todos los usuarios del tenant. Si tiene valor, debe ser un GUID o la app no arranca |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | Telemetría (secreto de Container Apps) |
 
 Configuración de `appsettings.json`, que se puede sobrescribir con variables de entorno (por ejemplo, `RateLimiting__ChatPermitsPerMinute=30`):

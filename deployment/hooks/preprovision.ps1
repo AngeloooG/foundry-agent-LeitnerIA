@@ -24,6 +24,18 @@ if (-not $account) {
 }
 Write-Host "[OK] Azure CLI: $($account.user.name)" -ForegroundColor Green
 
+# Optional group restriction: empty = every user of the tenant; otherwise it must be a group object id (GUID).
+# The API validates it again at startup, but failing here avoids deploying a revision that cannot start.
+$allowedGroupId = (azd env get-value ENTRA_ALLOWED_GROUP_ID 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+if (-not [string]::IsNullOrWhiteSpace($allowedGroupId)) {
+    $parsedGroup = [Guid]::Empty
+    if (-not [Guid]::TryParse($allowedGroupId.Trim(), [ref]$parsedGroup)) {
+        Write-Host "[ERROR] ENTRA_ALLOWED_GROUP_ID must be a group object id (GUID). Clear it to allow every tenant user: azd env set ENTRA_ALLOWED_GROUP_ID ''" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[OK] Optional group restriction: $allowedGroupId" -ForegroundColor Green
+}
+
 # Get environment
 $envName = (azd env get-value AZURE_ENV_NAME 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($envName)) { $envName = $env:AZURE_ENV_NAME }

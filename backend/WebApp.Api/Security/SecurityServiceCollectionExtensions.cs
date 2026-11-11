@@ -1,8 +1,8 @@
-using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 
 namespace WebApp.Api.Security;
@@ -15,12 +15,16 @@ public static class RateLimitPolicies
 
 public static class AuthorizationPolicies
 {
+    /// <summary>Delegated scope exposed by the Entra app registration (infra/entra-app.bicep) and requested by the SPA.</summary>
     public const string RequiredScope = "Chat.ReadWrite";
+
+    /// <summary>Tenant user + API scope + optional group. Applied to the /api group and as fallback policy.</summary>
     public const string ChatScope = "RequireChatScope";
 }
 
 /// <summary>
-/// Authentication (Entra ID), authorization (scope + secure-by-default fallback), rate limiting and CORS.
+/// Authentication (Entra ID), authorization (tenant + scope + optional group, secure-by-default fallback),
+/// rate limiting and CORS. Access decisions live here only; endpoints never repeat them.
 /// </summary>
 public static class SecurityServiceCollectionExtensions
 {
@@ -31,47 +35,44 @@ public static class SecurityServiceCollectionExtensions
         var configuration = builder.Configuration;
         var isDevelopment = builder.Environment.IsDevelopment();
 
-        // Entra ID settings come from azd / Container Apps environment variables.
-        var clientId = configuration["ENTRA_SPA_CLIENT_ID"] ?? configuration["AzureAd:ClientId"];
-        var tenantId = configuration["ENTRA_TENANT_ID"] ?? configuration["AzureAd:TenantId"];
-        if (!Guid.TryParse(clientId, out _) || !Guid.TryParse(tenantId, out _))
-        {
-            // Fail fast: placeholders would otherwise start the app and reject every request at runtime.
-            throw new InvalidOperationException(
-                "ENTRA_SPA_CLIENT_ID and ENTRA_TENANT_ID must be valid GUIDs. Run 'azd provision' or configure the .env file.");
-        }
-        configuration["AzureAd:ClientId"] = clientId;
-        configuration["AzureAd:TenantId"] = tenantId;
-        configuration["AzureAd:Audience"] = $"api://{clientId}";
+        // Entra settings: validated when the host starts (fail fast, all errors reported at once).
+        builder.Services.AddOptions<EntraOptions>()
+            .Configure<IConfiguration>(EntraOptions.Bind)
+            .ValidateOnStart();
+        builder.Services.AddSingleton<IValidateOptions<EntraOptions>, EntraOptionsValidator>();
+
+        // Microsoft.Identity.Web reads the "AzureAd" section to build the single-tenant authority.
+        var entra = EntraOptions.From(configuration);
+        configuration["AzureAd:ClientId"] = entra.ClientId;
+        configuration["AzureAd:TenantId"] = entra.TenantId;
+        configuration["AzureAd:Audience"] = $"api://{entra.ClientId}";
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddMicrosoftIdentityWebApi(options =>
-            {
-                configuration.Bind("AzureAd", options);
-                var backendClientId = configuration["ENTRA_BACKEND_CLIENT_ID"];
+            .AddMicrosoftIdentityWebApi(
+                options => configuration.Bind("AzureAd", options),
+                options => configuration.Bind("AzureAd", options));
 
-                // Access tokens for the exposed API carry aud = api://{clientId} (v1) or {clientId} (v2).
-                var audiences = new List<string> { clientId!, $"api://{clientId}" };
-                if (!string.IsNullOrEmpty(backendClientId))
-                {
-                    audiences.Add(backendClientId);
-                    audiences.Add($"api://{backendClientId}");
-                }
-                options.TokenValidationParameters.ValidAudiences = audiences;
-                options.TokenValidationParameters.NameClaimType = ClaimTypes.Name;
-                options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
-            }, options => configuration.Bind("AzureAd", options));
+        // Strict validation (issuer + tid pinned to the tenant, audience, signature, lifetime). PostConfigure runs
+        // after Microsoft.Identity.Web's own configuration, so these rules are the ones in effect.
+        builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .PostConfigure<IOptions<EntraOptions>>((jwt, entraOptions) =>
+                EntraTokenValidation.Apply(jwt.TokenValidationParameters, entraOptions.Value));
 
-        var scopePolicy = new AuthorizationPolicyBuilder()
+        // One policy for every API endpoint: authenticated user of the tenant, API scope and, only when
+        // ENTRA_ALLOWED_GROUP_ID is set, membership of that group. Azure RBAC is never used for end users.
+        var corporateUserPolicy = new AuthorizationPolicyBuilder()
             .RequireAuthenticatedUser()
             .RequireScope(AuthorizationPolicies.RequiredScope)
+            .AddRequirements(new TenantMemberRequirement(), new AllowedGroupRequirement())
             .Build();
 
+        builder.Services.AddSingleton<IAuthorizationHandler, TenantMemberHandler>();
+        builder.Services.AddSingleton<IAuthorizationHandler, AllowedGroupHandler>();
         builder.Services.AddAuthorizationBuilder()
-            .AddPolicy(AuthorizationPolicies.ChatScope, scopePolicy)
-            // Secure by default: endpoints without explicit metadata require the API scope.
+            .AddPolicy(AuthorizationPolicies.ChatScope, corporateUserPolicy)
+            // Secure by default: endpoints without explicit metadata get the same policy.
             // Public endpoints (health probes, SPA fallback) opt out with AllowAnonymous().
-            .SetFallbackPolicy(scopePolicy);
+            .SetFallbackPolicy(corporateUserPolicy);
 
         builder.Services.AddRateLimiter(options => ConfigureRateLimiting(options, configuration));
 

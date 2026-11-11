@@ -41,7 +41,7 @@ Argumentos de build (identificadores públicos, no secretos): `ENTRA_SPA_CLIENT_
 ## Antes de producción (checklist)
 
 1. Revisión senior de los cambios de RBAC, Entra ID y red.
-2. Perfil `prod` aplicado, y `ENTRA_ALLOWED_GROUP_ID` con el grupo de usuarios autorizado.
+2. Perfil `prod` aplicado. `ENTRA_ALLOWED_GROUP_ID` es opcional: déjelo vacío para dar acceso a todo el tenant.
 3. `azd provision --preview` revisado.
 4. Después del despliegue, verificar el inicio de sesión, la generación de una Battlecard y el enlace a SharePoint.
 5. Retirar los roles heredados: `azd env set REMOVE_LEGACY_FOUNDRY_ROLES true; azd hooks run postprovision`.

@@ -47,7 +47,7 @@ Un documento breve y accionable para posicionar una propuesta frente a una alter
 ### Acceso
 
 1. Abra la URL de la aplicación. Se le redirigirá al inicio de sesión corporativo de Microsoft (Entra ID).
-2. Solo pueden entrar los usuarios **asignados** a la aplicación. Si ve "No se pudo iniciar sesión", solicite acceso al administrador (grupo configurado en `ENTRA_ALLOWED_GROUP_ID`).
+2. Puede entrar cualquier usuario de la organización (tenant de CONSEIN). Si el entorno tiene configurada la restricción opcional por grupo (`ENTRA_ALLOWED_GROUP_ID`), solo sus miembros podrán usar el agente; los demás verán "Acceso denegado" al enviar un mensaje y deben pedir al administrador que los incluya en el grupo.
 3. La sesión se guarda solo en la pestaña actual; al abrir otra pestaña el inicio de sesión es automático.
 
 ### Páginas
@@ -98,7 +98,7 @@ Cada Battlecard se organiza en tres niveles, para no mezclar reputación corpora
 Monolito modular en un único Azure Container App: el backend ASP.NET Core sirve la SPA de React y expone la API.
 
 ```text
-Usuario (Entra ID, asignación requerida)
+Usuario del tenant (Entra ID single-tenant; grupo opcional)
    │ HTTPS (TLS en el ingress de Container Apps)
    ▼
 Container App "ca-web-<token>"  (escala a cero en dev)
@@ -149,7 +149,8 @@ El detalle técnico está en [ARCHITECTURE-FLOW.md](ARCHITECTURE-FLOW.md).
 
 Controles implementados:
 
-- Acceso solo para usuarios asignados en Entra ID; tokens validados por audiencia y scope.
+- Single-tenant: solo se aceptan tokens del tenant configurado. Se validan estrictamente el issuer y el `tid`, la audiencia, la firma y la expiración.
+- Acceso para todos los usuarios autenticados del tenant, con restricción opcional por grupo (`ENTRA_ALLOWED_GROUP_ID`). Las decisiones de acceso están centralizadas en `backend/WebApp.Api/Security`. Ver [modelo de acceso](docs/decisiones-arquitectura.md#6-modelo-de-acceso-entra-id).
 - Política de autorización por defecto: cualquier endpoint nuevo exige autenticación.
 - Aislamiento de conversaciones por usuario; un ID ajeno devuelve 404.
 - Validación de entrada antes de llamar a Azure: tamaño del mensaje, formato de IDs, tipo real de los adjuntos (firma binaria y UTF-8) y límite del cuerpo de la petición.
@@ -205,7 +206,8 @@ azd env new <entorno>
 azd env set AI_FOUNDRY_RESOURCE_NAME <cuenta-foundry>
 azd env set AI_FOUNDRY_PROJECT_NAME <proyecto>
 azd env set AI_AGENT_ID LeitnerIA
-azd env set ENTRA_ALLOWED_GROUP_ID <id-del-grupo-de-ventas>
+# Opcional: restringir el acceso a un grupo (vacío = todos los usuarios del tenant)
+# azd env set ENTRA_ALLOWED_GROUP_ID <object-id-del-grupo>
 azd provision --preview    # revise los cambios
 azd up                     # aprovisiona, construye la imagen y la publica
 ```

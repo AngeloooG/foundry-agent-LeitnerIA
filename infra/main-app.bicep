@@ -10,6 +10,8 @@ param aiAgentVersion string = ''
 param entraSpaClientId string
 param entraTenantId string
 param entraBackendClientId string = ''
+@description('Optional group restriction enforced by the API (empty = every user of the tenant)')
+param entraAllowedGroupId string = ''
 param webImageName string
 param userAssignedIdentityId string = ''
 param managedIdentityClientId string = ''
@@ -72,6 +74,13 @@ var versionEnv = !empty(aiAgentVersion) ? [
   }
 ] : []
 
+var groupEnv = !empty(entraAllowedGroupId) ? [
+  {
+    name: 'ENTRA_ALLOWED_GROUP_ID'
+    value: entraAllowedGroupId
+  }
+] : []
+
 var oboEnv = !empty(entraBackendClientId) ? [
   {
     name: 'ENTRA_BACKEND_CLIENT_ID'
@@ -90,7 +99,7 @@ module webApp './core/host/container-app.bicep' = {
     containerRegistryName: containerRegistryName
     containerImage: webImageName
     targetPort: 8080
-    env: concat(baseEnv, versionEnv, oboEnv)
+    env: concat(baseEnv, versionEnv, groupEnv, oboEnv)
     // Connection strings are ingestion keys: stored as Container Apps secrets, not plain env vars.
     secretEnv: {
       APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString

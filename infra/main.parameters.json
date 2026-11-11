@@ -56,8 +56,8 @@
     "enableEntraTelemetryAuth": {
       "value": "${ENABLE_ENTRA_TELEMETRY_AUTH=false}"
     },
-    "requireUserAssignment": {
-      "value": "${ENTRA_REQUIRE_USER_ASSIGNMENT=true}"
+    "entraAllowedGroupId": {
+      "value": "${ENTRA_ALLOWED_GROUP_ID=}"
     }
   }
 }

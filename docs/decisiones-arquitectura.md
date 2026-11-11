@@ -60,3 +60,55 @@ Este documento registra qué patrones se aplicaron en el refactor de LeitnerIA (
 - Migración de estilos a CSS Modules.
 - Pruebas de componentes con Testing Library.
 - Pipeline de CI (hoy solo hay Dependabot).
+
+## 6. Modelo de acceso (Entra ID)
+
+### Decisión
+
+Leitner IA es una aplicación interna. Puede usarla **cualquier usuario autenticado del tenant de CONSEIN**; no hay roles funcionales.
+
+| Aspecto | Decisión |
+|---|---|
+| Tipo de cuenta | Single-tenant (`AzureADMyOrg`): solo cuentas de este directorio |
+| Enterprise Application | *Assignment required* = **No** (`appRoleAssignmentRequired: false` en `infra/entra-app.bicep`) |
+| Restricción por grupo | **Opcional** con `ENTRA_ALLOWED_GROUP_ID`. Vacía o ausente: no se evalúa ningún grupo. Con un GUID: restricción adicional. Con un valor que no sea GUID: la API no arranca (`ValidateOnStart`) y `preprovision` falla |
+| App roles | No se crean mientras no existan capacidades funcionales distintas |
+| Azure RBAC | Solo para identidades técnicas sobre recursos de Azure (managed identity → Foundry, ACR, App Insights). Nunca para usuarios finales |
+| Redirect URIs de localhost | Solo con `ENTRA_ALLOW_LOCALHOST_REDIRECTS=true` (opción explícita de desarrollo) |
+
+### Dónde se aplica
+
+Todo está en `backend/WebApp.Api/Security/`. Ningún endpoint repite estas comprobaciones.
+
+| Pieza | Responsabilidad |
+|---|---|
+| `EntraOptions` + `EntraOptionsValidator` | `TenantId` y `ClientId` obligatorios (GUID); `BackendClientId` y `AllowedGroupId` opcionales (GUID si tienen valor). Validación al arrancar |
+| `EntraTokenValidation` | Issuer igual al v1 o v2 **del tenant configurado** y `tid` coincidente; audiencias `{clientId}` y `api://{clientId}`; firma y expiración obligatorias; tolerancia de reloj de 2 minutos. Se aplica con `PostConfigure`, después de Microsoft.Identity.Web |
+| `CorporateAccessAuthorization` | `TenantMemberRequirement` (defensa en profundidad sobre `tid`) y `AllowedGroupRequirement` (se cumple siempre si no hay grupo; si lo hay, exige el claim `groups`) |
+| `SecurityServiceCollectionExtensions` | Una sola política: autenticado + scope `Chat.ReadWrite` + ambos requisitos, aplicada al grupo `/api` y como política de respaldo |
+
+La ausencia de grupo **nunca** desactiva la validación del token: issuer, tenant, audiencia, firma y expiración se validan siempre.
+
+### Restricción por grupo: detalles
+
+- Cuando `ENTRA_ALLOWED_GROUP_ID` tiene valor, Bicep activa `groupMembershipClaims: SecurityGroup` en la app (y en la app de OBO, si existe) para que el access token incluya el claim `groups`.
+- Si un usuario pertenece a más grupos de los que caben en el token (más de 200 en JWT), Entra ID no envía `groups` sino un indicador de *overage*. La API **deniega** el acceso (fail closed) y registra un aviso. Resolver el overage con Microsoft Graph no está implementado porque requiere permisos adicionales y añade latencia.
+- Al activar o desactivar el grupo hay que reaprovisionar (`azd provision`): cambia la configuración de la app de Entra y la variable del contenedor. Los usuarios deben volver a iniciar sesión para recibir un token con el claim.
+
+### Usuarios invitados (B2B)
+
+"Todos los usuarios del tenant" **incluye las cuentas Guest del directorio**. Un invitado B2B inicia sesión en el tenant de CONSEIN y recibe un token emitido por ese tenant (`tid` de CONSEIN), por lo que cumple todas las validaciones. Single-tenant no excluye invitados por sí mismo.
+
+Si la organización decide excluirlos, la alternativa de menor complejidad (no implementada) es:
+
+1. Añadir el claim opcional `acct` al access token de la app de Entra (`optionalClaims.accessToken`: `acct`). Vale `0` para miembros y `1` para invitados.
+2. Añadir un `MemberAccountRequirement` a la misma política de `SecurityServiceCollectionExtensions` que deniegue `acct = 1`.
+
+Es un cambio de configuración más un requisito de unas 15 líneas con su prueba, sin licencias adicionales. Si CONSEIN tiene Microsoft Entra ID P1, también puede hacerse sin código con una directiva de **Acceso condicional** que bloquee a "Guest or external users" para esta aplicación.
+
+Con `ENTRA_ALLOWED_GROUP_ID` configurado, los invitados solo acceden si alguien los añade al grupo.
+
+### Pendiente de permisos de Entra o Azure
+
+- Aplicar el cambio con `azd provision` (revisión senior): fija `appRoleAssignmentRequired: false` (hoy ya está en `false` en el entorno desplegado) y, solo si se configura un grupo, `groupMembershipClaims`.
+- Si en algún momento se activó la asignación obligatoria o se asignaron usuarios manualmente, esas asignaciones quedan sin efecto pero no se borran; pueden retirarse en *Enterprise applications > Users and groups*.

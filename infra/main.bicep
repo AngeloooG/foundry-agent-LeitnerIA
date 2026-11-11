@@ -71,8 +71,8 @@ param containerRegistrySku string = 'Basic'
 @description('Backend telemetry authenticated with Entra ID (disables key-based ingestion on the backend App Insights)')
 param enableEntraTelemetryAuth bool = false
 
-@description('Require users to be assigned to the Entra enterprise app (true = only assigned users/groups can sign in)')
-param requireUserAssignment bool = true
+@description('Optional Entra security group (object id) allowed to use the app. Empty = every authenticated user of the tenant.')
+param entraAllowedGroupId string = ''
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
@@ -113,7 +113,7 @@ module entraApp 'entra-app.bicep' = {
     environmentName: environmentName
     serviceManagementReference: serviceManagementReference
     enableObo: enableObo
-    requireUserAssignment: requireUserAssignment
+    allowedGroupId: entraAllowedGroupId
   }
 }
 
@@ -133,6 +133,7 @@ module app 'main-app.bicep' = {
     entraSpaClientId: entraApp.outputs.clientAppId
     entraTenantId: entraTenantId
     entraBackendClientId: enableObo ? entraApp.outputs.backendClientAppId : ''
+    entraAllowedGroupId: entraAllowedGroupId
     webImageName: webImageName
     userAssignedIdentityId: infrastructure.outputs.managedIdentityId
     managedIdentityClientId: infrastructure.outputs.managedIdentityClientId

@@ -49,8 +49,16 @@ Patrones aplicados:
 2. `UseExceptionHandler` con `ApiExceptionHandler`, que devuelve ProblemDetails. Los detalles internos solo se muestran en Development.
 3. Archivos estáticos (`wwwroot`, la SPA), atendidos antes del enrutamiento.
 4. CORS, solo en Development.
-5. Autenticación JWT con Microsoft.Identity.Web y audiencias `api://{clientId}` y `{clientId}`.
-6. Autorización: política `RequireChatScope` y política de respaldo (fallback) equivalente.
+5. Autenticación JWT con Microsoft.Identity.Web, endurecida por `EntraTokenValidation`:
+   - El issuer debe ser el v1 o v2 **del tenant configurado** y el claim `tid` debe coincidir. Las claves de firma de Entra ID son comunes a todos los tenants, así que la firma por sí sola no basta.
+   - Audiencias `{clientId}` y `api://{clientId}`; firma y expiración obligatorias (tolerancia de reloj de 2 minutos).
+6. Autorización: una sola política (`RequireChatScope`), aplicada al grupo `/api` y como política de respaldo:
+   - usuario autenticado;
+   - scope `Chat.ReadWrite`;
+   - `TenantMemberRequirement`: el `tid` es el tenant configurado (defensa en profundidad);
+   - `AllowedGroupRequirement`: si `ENTRA_ALLOWED_GROUP_ID` está vacío, siempre se cumple; si tiene valor, exige ese grupo en el claim `groups`. Si el token llega con *overage* de grupos, se deniega (fail closed).
+
+   Ningún endpoint repite estas comprobaciones. Azure RBAC no interviene en la autorización de usuarios finales.
 7. Rate limiting por usuario: `chat`, 20 por minuto; `api`, 120 por minuto.
 8. Endpoints:
 
@@ -181,7 +189,7 @@ azd provision
   preprovision.ps1   descubre la cuenta y el proyecto de Foundry (nunca elige en silencio) y el agente
   Bicep (main.bicep) RG, Log Analytics, App Insights x2, ACR, Container Apps Environment, identidad, Container App, app Entra
   postprovision.ps1  identifierUri y redirect URIs, OBO (opcional), rol "Foundry User" en el proyecto,
-                     asignación de usuarios a la app, .env locales
+                     .env locales (no asigna usuarios: el acceso es de todo el tenant)
 azd deploy / predeploy.ps1
   docker build (web.Dockerfile: Vite build → dotnet publish → aspnet:10.0-alpine, usuario no root)
   push a ACR (Entra ID) → az containerapp update --image
