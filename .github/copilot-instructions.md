@@ -16,7 +16,8 @@ See `ARCHITECTURE-FLOW.md` for the end-to-end flow.
 ## Design Decisions
 
 - **Single container** — Backend serves API (`/api/*`) and React SPA from `wwwroot`, deployed as one Container App resource.
-- **Credential strategy** — Production: `ManagedIdentityCredential` (user-assigned MI) or `OnBehalfOfCredential` (OBO) — mutually exclusive, controlled by `ENTRA_BACKEND_CLIENT_ID` env var. Development: `ChainedTokenCredential(AzureCliCredential, AzureDeveloperCliCredential)`.
+- **Two app registrations** — `ENTRA_FRONTEND_CLIENT_ID` (SPA, sign-in) and `ENTRA_BACKEND_CLIENT_ID` (API, the only accepted audience; scope `api://<backend>/Chat.ReadWrite`). The SPA bundle carries `leitneria-build.json`; the API refuses to start if it does not match.
+- **Credential strategy** — Production: `ManagedIdentityCredential` (user-assigned MI) or `OnBehalfOfCredential` (OBO, only with `ENABLE_OBO=true`) — mutually exclusive, controlled by `ENTRA_BACKEND_CLIENT_ID` env var. Development: `ChainedTokenCredential(AzureCliCredential, AzureDeveloperCliCredential)`.
 - **OBO admin consent** — `AIProjectClient` scope `https://ai.azure.com/.default` resolves to **Azure Machine Learning Services** (appId `18a66f5f-...`). Admin consent must target this service principal.
 - **OBO scope** — `OnBehalfOfCredential` authenticates Agent Service API calls. Agent tools (MCP, OpenAPI, Logic Apps) use the agent's own identity from Foundry portal.
 - **User-assigned MI** — Created in the infrastructure module; used for ACR pull (`AcrPull` role) and reused for OBO FIC when enabled.

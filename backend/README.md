@@ -43,13 +43,15 @@ Variables de entorno, que inyecta azd o Container Apps (en local, las escribe en
 
 | Variable | Obligatoria | Descripción |
 |---|---|---|
-| `ENTRA_SPA_CLIENT_ID` | Sí | Client ID de la app Entra (GUID). Sin registro de backend, es también la audiencia de la API |
+| `ENTRA_FRONTEND_CLIENT_ID` | Sí | Registro del SPA (GUID). Nunca es una audiencia aceptada; se usa para rechazar configuraciones ambiguas y verificar el bundle |
 | `ENTRA_TENANT_ID` | Sí | Tenant (GUID) |
 | `AI_AGENT_ENDPOINT` | Sí | `https://<cuenta>.services.ai.azure.com/api/projects/<proyecto>` |
 | `AI_AGENT_ID` | Sí | Nombre del agente (`LeitnerIA`) |
 | `AI_AGENT_VERSION` | No | Versión fija del agente (por defecto, la más reciente) |
 | `MANAGED_IDENTITY_CLIENT_ID` | En Azure | Identidad user-assigned |
-| `ENTRA_BACKEND_CLIENT_ID` | No | Registro separado de la API (activa On-Behalf-Of). Si tiene valor, es la **única** audiencia aceptada y debe ser distinto de `ENTRA_SPA_CLIENT_ID` |
+| `ENTRA_BACKEND_CLIENT_ID` | Sí | Registro de la API (GUID, distinto del frontend). Es la **única** audiencia aceptada (`{id}` y `api://{id}`) |
+| `ENABLE_OBO` | No | `true` para llamar a Foundry On-Behalf-Of del usuario (requiere RBAC por usuario y consentimiento). Vacío o `false`: managed identity. Otro valor: la app no arranca |
+| `ENTRA_SPA_CLIENT_ID` | — | **Eliminada.** Si sigue definida, la app no arranca (sustituida por las dos anteriores) |
 | `ENTRA_ALLOWED_GROUP_ID` | No | Restricción opcional por grupo (object id). Vacío = todos los usuarios del tenant. Si tiene valor, debe ser un GUID o la app no arranca |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | Telemetría (secreto de Container Apps) |
 

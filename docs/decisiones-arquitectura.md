@@ -125,6 +125,8 @@ Con Microsoft Entra ID P1 también puede hacerse sin código, con una directiva 
 
 ### Auditoría del modelo (2026-11-11)
 
+> **Actualización (rama `pre-develop`):** el modelo pasa a **dos registros** (SPA y API) y la API acepta solo la audiencia del backend. Ver `docs/pr/pre-develop-security-review.md`. Lo siguiente describe el entorno desplegado hoy.
+
 **Registros de aplicación.** El entorno desplegado usa **un solo registro** para el SPA y la API:
 
 | Dato | Valor |
@@ -138,7 +140,7 @@ Con Microsoft Entra ID P1 también puede hacerse sin código, con una directiva 
 
 El Container App no tiene `ENTRA_BACKEND_CLIENT_ID`, así que OBO no está activo. Si se activa (`ENABLE_OBO=true`), Bicep crea un segundo registro (`ai-foundry-agent-backend-<entorno>`) que pasa a ser la **única** audiencia aceptada.
 
-**Audiencia aceptada** (`EntraOptions.ApiClientId`, que es `ENTRA_BACKEND_CLIENT_ID` si existe y si no `ENTRA_SPA_CLIENT_ID`): `api://{ApiClientId}` y `{ApiClientId}`. Son las dos formas (v1 y v2) del mismo registro. Con dos registros, el Client ID del SPA se rechaza con 401. `ENTRA_BACKEND_CLIENT_ID` igual a `ENTRA_SPA_CLIENT_ID` es un error de configuración y la API no arranca.
+**Audiencia aceptada** (en `pre-develop`: solo `ENTRA_BACKEND_CLIENT_ID`, obligatorio; antes `EntraOptions.ApiClientId`, que caía al registro del SPA): `api://{ApiClientId}` y `{ApiClientId}`. Son las dos formas (v1 y v2) del mismo registro. Con dos registros, el Client ID del SPA se rechaza con 401. `ENTRA_BACKEND_CLIENT_ID` igual a `ENTRA_SPA_CLIENT_ID` es un error de configuración y la API no arranca.
 
 **Scope solicitado** (`frontend/src/config/authConfig.ts`, usado por `loginRequest` y `tokenRequest`, y este por `useAuth().getAccessToken`): `api://{VITE_ENTRA_BACKEND_CLIENT_ID || VITE_ENTRA_SPA_CLIENT_ID}/Chat.ReadWrite`. Hoy es `api://491ceed0-443d-4414-b16f-91ecdcafafeb/Chat.ReadWrite`.
 

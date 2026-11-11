@@ -15,7 +15,7 @@ Infraestructura como código con Bicep, desplegada con Azure Developer CLI. Las 
 | Managed identity (user-assigned) | `id-web-<token>` | `main-infrastructure.bicep` | `isolationScope: Regional` |
 | Container App | `ca-web-<token>` | `core/host/container-app.bicep` | SPA + API, puerto 8080, sondas `/api/health` |
 | App Entra (SPA + API) | `ai-foundry-agent-<entorno>` | `entra-app.bicep` | Single-tenant, scope `Chat.ReadWrite`, sin asignación requerida; claim `groups` solo si hay grupo configurado |
-| App Entra backend (OBO) | `ai-foundry-agent-backend-<entorno>` | ídem | Solo con `ENABLE_OBO=true` |
+| App Entra backend (API) | `ai-foundry-agent-backend-<entorno>` | ídem | Siempre. Expone `Chat.ReadWrite` (tokens v2) y es la única audiencia de la API. Con `ENABLE_OBO=true` añade el permiso a Azure ML y la credencial federada |
 
 **Fuera de este Bicep**, configurados con hooks o de forma manual:
 
@@ -44,7 +44,10 @@ Se configuran como variables de azd (`azd env set NOMBRE valor`), que `main.para
 | `AI_FOUNDRY_RESOURCE_NAME` / `AI_FOUNDRY_PROJECT_NAME` | (descubre) | | | Obligatorios si hay más de una cuenta o proyecto |
 | `AI_AGENT_ID` / `AI_AGENT_VERSION` | | | | Agente y versión fija (opcional) |
 | `REMOVE_LEGACY_FOUNDRY_ROLES` | false | | true tras verificar | Retira los 3 roles amplios anteriores |
-| `ENABLE_OBO` | false | | | On-Behalf-Of (el agente actúa con la identidad del usuario) |
+| `ENABLE_OBO` | false | false | false | On-Behalf-Of hacia Foundry. Un registro de backend separado NO lo activa |
+| `ENTRA_ALLOW_LOCALHOST_REDIRECTS` | false | true | false | Redirect URIs `http://localhost` en el SPA (Bicep y postprovision) |
+| `ENTRA_GRANT_SPA_ADMIN_CONSENT` | false | | | Consentimiento de administrador SPA → backend (requiere rol de administrador de Entra) |
+| `TAG_AGENTE` / `TAG_ENTORNO` / `TAG_PLATAFORMA` | LeitnerIA / dev / Foundry | | | Tags de gobierno del resource group y los recursos (sin ellas el provision las borraría) |
 
 ## Despliegue
 
@@ -119,7 +122,8 @@ Son precios orientativos: confírmelos en la [calculadora de precios de Azure](h
 | Síntoma | Causa probable | Acción |
 |---|---|---|
 | La revisión no arranca (falla la startup probe) | Configuración inválida: la API valida al arrancar | Revise los logs del contenedor: el mensaje indica qué variable falta |
-| 401 en `/api` | Token de otro tenant, audiencia incorrecta o expirado | Revise `ENTRA_TENANT_ID` / `ENTRA_SPA_CLIENT_ID` y el scope que pide la SPA |
+| 401 en `/api` | Token de otro tenant, audiencia incorrecta o expirado | Revise `ENTRA_TENANT_ID` / `ENTRA_BACKEND_CLIENT_ID` y que la imagen se construyó con el mismo backend |
+| La revisión no arranca tras un deploy | `leitneria-build.json` del bundle no coincide con `ENTRA_*_CLIENT_ID` del contenedor | Reconstruya la imagen con `azd deploy` después de `azd provision` |
 | 403 en `/api` | Falta el scope o, con `ENTRA_ALLOWED_GROUP_ID`, el usuario no es miembro del grupo (o tiene más de 200 grupos) | Añada al usuario al grupo, o vacíe la variable para acceso de todo el tenant |
 | 403 de Foundry en los logs | Rol no propagado o en otra cuenta | Verifique "Foundry User" en el proyecto de `AI_AGENT_ENDPOINT` (la propagación tarda unos minutos) |
 | "Multiple AI Foundry resources" | Hay varias cuentas o proyectos | `azd env set AI_FOUNDRY_RESOURCE_NAME` / `AI_FOUNDRY_PROJECT_NAME` |

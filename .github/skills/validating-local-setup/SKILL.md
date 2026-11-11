@@ -49,7 +49,7 @@ This app requires `azd up` before local development works. Here's what it provis
 
 | Variable | Source | Required |
 |----------|--------|----------|
-| `VITE_ENTRA_SPA_CLIENT_ID` | Entra app registration (created by `azd up`) | Yes |
+| `VITE_ENTRA_FRONTEND_CLIENT_ID` | Entra app registration (created by `azd up`) | Yes |
 | `VITE_ENTRA_TENANT_ID` | Azure AD tenant | Yes |
 | `VITE_ENTRA_BACKEND_CLIENT_ID` | Backend app registration (OBO mode only) | No |
 
@@ -69,7 +69,7 @@ This app requires `azd up` before local development works. Here's what it provis
 ```
 login.microsoftonline.com/undefined/oauth2/v2.0/authorize?client_id=undefined
 ```
-**Cause**: `VITE_ENTRA_SPA_CLIENT_ID` and `VITE_ENTRA_TENANT_ID` not set.
+**Cause**: `VITE_ENTRA_FRONTEND_CLIENT_ID` and `VITE_ENTRA_TENANT_ID` not set.
 **Fix**: Run `azd up` — this creates the Entra app and generates `frontend/.env.local`.
 
 ### AADSTS900023: Specified tenant identifier is neither a valid DNS name

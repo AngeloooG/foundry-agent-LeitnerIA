@@ -40,9 +40,9 @@ Variables de build (públicas; quedan dentro del bundle, nunca ponga secretos aq
 
 | Variable | Descripción |
 |---|---|
-| `VITE_ENTRA_SPA_CLIENT_ID` | Client ID de la app Entra |
+| `VITE_ENTRA_FRONTEND_CLIENT_ID` | Registro del SPA (client id de MSAL). Obligatorio |
 | `VITE_ENTRA_TENANT_ID` | Tenant |
-| `VITE_ENTRA_BACKEND_CLIENT_ID` | Opcional, solo con OBO |
+| `VITE_ENTRA_BACKEND_CLIENT_ID` | Registro de la API. Obligatorio: el SPA pide `api://<backend>/Chat.ReadWrite` y no hay fallback al frontend. El build de producción falla sin él y genera `leitneria-build.json`, que la API verifica al arrancar |
 | `VITE_APPLICATIONINSIGHTS_CONNECTION_STRING` | Opcional; clave de ingesta del navegador (pública por diseño) |
 | `VITE_SHAREPOINT_HOST` | Opcional; por defecto `conseincloud.sharepoint.com` |
 

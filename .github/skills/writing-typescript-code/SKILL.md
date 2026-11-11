@@ -78,16 +78,16 @@ try {
 
 ```typescript
 // ✅ Correct - module level
-const clientId = import.meta.env.VITE_ENTRA_SPA_CLIENT_ID;
+const clientId = import.meta.env.VITE_ENTRA_FRONTEND_CLIENT_ID;
 
 // ❌ Wrong - inside function (won't work after build)
 function getClientId() {
-  return import.meta.env.VITE_ENTRA_SPA_CLIENT_ID;
+  return import.meta.env.VITE_ENTRA_FRONTEND_CLIENT_ID;
 }
 ```
 
 **Available variables**:
-- `VITE_ENTRA_SPA_CLIENT_ID` - Entra app client ID
+- `VITE_ENTRA_FRONTEND_CLIENT_ID` - Entra app client ID
 - `VITE_ENTRA_TENANT_ID` - Azure tenant ID
 
 ## State Management

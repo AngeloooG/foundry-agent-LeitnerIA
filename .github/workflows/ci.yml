@@ -4,9 +4,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, pre-develop]
+    branches: [main, Develop-LeitnerIA, pre-develop]
   push:
-    branches: [main, pre-develop]
+    branches: [main, Develop-LeitnerIA, pre-develop]
   workflow_dispatch:
 
 # Least privilege for GITHUB_TOKEN. Jobs that need more declare it explicitly.

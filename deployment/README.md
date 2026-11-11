@@ -36,7 +36,7 @@ deployment/
 
 `predeploy.ps1` usa Docker local si está disponible (~2 minutos) y, si no, ACR Tasks (~4-5 minutos). La imagen se etiqueta `web:deploy-<timestamp>` y se sube autenticada con Entra ID; el usuario admin de ACR está deshabilitado.
 
-Argumentos de build (identificadores públicos, no secretos): `ENTRA_SPA_CLIENT_ID`, `ENTRA_TENANT_ID`, `ENTRA_BACKEND_CLIENT_ID` y `APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING`. `.dockerignore` excluye `**/.env*`, `.azure` y las pruebas del contexto de build.
+Argumentos de build (identificadores públicos, no secretos): `ENTRA_FRONTEND_CLIENT_ID`, `ENTRA_BACKEND_CLIENT_ID` (ambos obligatorios), `ENTRA_TENANT_ID` y `APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING`. `.dockerignore` excluye `**/.env*`, `.azure` y las pruebas del contexto de build.
 
 ## Antes de producción (checklist)
 
