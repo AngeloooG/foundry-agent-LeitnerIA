@@ -24,6 +24,16 @@ if (-not $account) {
 }
 Write-Host "[OK] Azure CLI: $($account.user.name)" -ForegroundColor Green
 
+# Explicit booleans: only "true", "false" or empty are accepted (a typo must never change identity settings).
+foreach ($flag in @('ENTRA_ALLOW_LOCALHOST_REDIRECTS', 'ENTRA_GRANT_SPA_ADMIN_CONSENT', 'ENABLE_OBO')) {
+    $flagValue = (azd env get-value $flag 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+    $flagValue = if ($flagValue) { $flagValue.Trim().ToLowerInvariant() } else { "" }
+    if ($flagValue -notin @("", "true", "false")) {
+        Write-Host "[ERROR] $flag must be 'true' or 'false' (got '$flagValue')" -ForegroundColor Red
+        exit 1
+    }
+}
+
 # Optional group restriction: empty = every user of the tenant; otherwise it must be a group object id (GUID).
 # The API validates it again at startup, but failing here avoids deploying a revision that cannot start.
 $allowedGroupId = (azd env get-value ENTRA_ALLOWED_GROUP_ID 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1

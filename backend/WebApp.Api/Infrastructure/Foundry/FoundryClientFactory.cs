@@ -25,7 +25,7 @@ public sealed class FoundryAppClient(IOptions<FoundryOptions> options, IHostEnvi
 
 /// <summary>
 /// Returns the Foundry client for the current request (strategy selected once per process):
-/// managed identity (default) or On-Behalf-Of the signed-in user when <c>ENTRA_BACKEND_CLIENT_ID</c> is set.
+/// managed identity (default) or On-Behalf-Of the signed-in user when <c>ENABLE_OBO=true</c>.
 /// </summary>
 public sealed class FoundryClientFactory(
     FoundryAppClient appClient,

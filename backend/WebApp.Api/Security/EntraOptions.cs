@@ -8,52 +8,59 @@ namespace WebApp.Api.Security;
 /// rejecting every request at runtime.
 /// </summary>
 /// <remarks>
-/// Access model (decided by CONSEIN): single-tenant, every authenticated user of <see cref="TenantId"/> may use the app.
-/// <see cref="AllowedGroupId"/> is an optional, additional restriction. Its absence never disables token validation.
-/// Note: "every user of the tenant" includes B2B guest accounts of the directory (their tokens are issued by this tenant).
+/// <para>Identity model: two app registrations.</para>
+/// <list type="bullet">
+/// <item><see cref="FrontendClientId"/>: SPA registration (interactive sign-in). Never an accepted audience.</item>
+/// <item><see cref="BackendClientId"/>: API registration that exposes <c>Chat.ReadWrite</c>. The ONLY accepted audience.</item>
+/// </list>
+/// <para>Access model (decided by CONSEIN): single-tenant, every authenticated identity of <see cref="TenantId"/>
+/// (members and B2B guests) may use the app. <see cref="AllowedGroupId"/> is an optional, additional restriction;
+/// its absence never disables token validation.</para>
 /// </remarks>
 public sealed class EntraOptions
 {
     public const string TenantIdVariable = "ENTRA_TENANT_ID";
-    public const string ClientIdVariable = "ENTRA_SPA_CLIENT_ID";
+    public const string FrontendClientIdVariable = "ENTRA_FRONTEND_CLIENT_ID";
     public const string BackendClientIdVariable = "ENTRA_BACKEND_CLIENT_ID";
     public const string AllowedGroupIdVariable = "ENTRA_ALLOWED_GROUP_ID";
+
+    /// <summary>Name used before the registrations were split. Must not be set any more (ambiguous).</summary>
+    public const string LegacySpaClientIdVariable = "ENTRA_SPA_CLIENT_ID";
 
     /// <summary>The only tenant whose tokens are accepted (required GUID).</summary>
     public string TenantId { get; set; } = string.Empty;
 
-    /// <summary>
-    /// SPA (frontend) app registration (required GUID). In the default single-registration architecture the same
-    /// registration also exposes the API scope, so it is the API audience as well.
-    /// </summary>
-    public string ClientId { get; set; } = string.Empty;
+    /// <summary>SPA registration (required GUID). Used to reject configurations where it equals the API audience.</summary>
+    public string FrontendClientId { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Separate backend API registration, used when On-Behalf-Of is enabled (optional GUID). When set it is the ONLY
-    /// accepted audience: tokens issued for the SPA registration are rejected.
-    /// </summary>
-    public string? BackendClientId { get; set; }
-
-    /// <summary>The registration that exposes <c>Chat.ReadWrite</c> and is the token audience.</summary>
-    public string ApiClientId => string.IsNullOrWhiteSpace(BackendClientId) ? ClientId : BackendClientId;
+    /// <summary>Backend API registration (required GUID, different from the frontend). Defines the token audience.</summary>
+    public string BackendClientId { get; set; } = string.Empty;
 
     /// <summary>Optional security group (object id). When set, only users whose token carries it in the groups claim are authorized.</summary>
     public string? AllowedGroupId { get; set; }
 
+    /// <summary>True when the legacy <see cref="LegacySpaClientIdVariable"/> is still present in the configuration.</summary>
+    public bool LegacyVariablePresent { get; set; }
+
     /// <summary>
-    /// Accepted <c>aud</c> values, both forms of the single API registration: the application ID URI
-    /// (<c>api://{id}</c>, v1 access tokens, the current default) and the client id (v2 access tokens).
+    /// Accepted <c>aud</c> values: both forms of the backend registration only, the client id (v2 access tokens, what
+    /// the backend registration issues) and the application ID URI <c>api://{id}</c> (v1 tokens).
     /// </summary>
-    public IReadOnlyList<string> Audiences => [ApiClientId, $"api://{ApiClientId}"];
+    public IReadOnlyList<string> Audiences => [BackendClientId, $"api://{BackendClientId}"];
+
+    /// <summary>Delegated scope the SPA must request: <c>api://{BackendClientId}/Chat.ReadWrite</c>.</summary>
+    public string ApiScope => $"api://{BackendClientId}/{AuthorizationPolicies.RequiredScope}";
 
     public bool HasGroupRestriction => !string.IsNullOrWhiteSpace(AllowedGroupId);
 
     public static void Bind(EntraOptions options, IConfiguration configuration)
     {
-        options.TenantId = (configuration[TenantIdVariable] ?? configuration["AzureAd:TenantId"] ?? string.Empty).Trim();
-        options.ClientId = (configuration[ClientIdVariable] ?? configuration["AzureAd:ClientId"] ?? string.Empty).Trim();
-        options.BackendClientId = NullIfEmpty(configuration[BackendClientIdVariable]);
+        // No fallbacks to other keys: one variable per setting, so the effective value is never ambiguous.
+        options.TenantId = (configuration[TenantIdVariable] ?? string.Empty).Trim();
+        options.FrontendClientId = (configuration[FrontendClientIdVariable] ?? string.Empty).Trim();
+        options.BackendClientId = (configuration[BackendClientIdVariable] ?? string.Empty).Trim();
         options.AllowedGroupId = NullIfEmpty(configuration[AllowedGroupIdVariable]);
+        options.LegacyVariablePresent = !string.IsNullOrWhiteSpace(configuration[LegacySpaClientIdVariable]);
     }
 
     public static EntraOptions From(IConfiguration configuration)
@@ -66,14 +73,16 @@ public sealed class EntraOptions
     /// <summary>Returns every configuration problem (empty when valid).</summary>
     public IEnumerable<string> Validate()
     {
+        if (LegacyVariablePresent)
+            yield return $"{LegacySpaClientIdVariable} was replaced by {FrontendClientIdVariable} (SPA) and {BackendClientIdVariable} (API audience); remove it.";
         if (!Guid.TryParse(TenantId, out _))
             yield return $"{TenantIdVariable} must be the tenant GUID.";
-        if (!Guid.TryParse(ClientId, out _))
-            yield return $"{ClientIdVariable} must be the GUID of the Entra app registration.";
-        if (BackendClientId is not null && !Guid.TryParse(BackendClientId, out _))
-            yield return $"{BackendClientIdVariable} must be a GUID when set.";
-        if (BackendClientId is not null && string.Equals(BackendClientId, ClientId, StringComparison.OrdinalIgnoreCase))
-            yield return $"{BackendClientIdVariable} must differ from {ClientIdVariable}; leave it empty for a single app registration.";
+        if (!Guid.TryParse(FrontendClientId, out _))
+            yield return $"{FrontendClientIdVariable} must be the GUID of the SPA app registration.";
+        if (!Guid.TryParse(BackendClientId, out _))
+            yield return $"{BackendClientIdVariable} must be the GUID of the API app registration (the token audience).";
+        else if (string.Equals(BackendClientId, FrontendClientId, StringComparison.OrdinalIgnoreCase))
+            yield return $"{BackendClientIdVariable} must differ from {FrontendClientIdVariable}: the API must not accept tokens issued for the SPA.";
         // Canonical form only (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx), the format Entra ID emits in the groups claim.
         if (AllowedGroupId is not null && !Guid.TryParseExact(AllowedGroupId, "D", out _))
             yield return $"{AllowedGroupIdVariable} must be a group object id (GUID) when set; leave it empty to allow every user of the tenant.";

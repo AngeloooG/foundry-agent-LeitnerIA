@@ -43,10 +43,10 @@ public static class SecurityServiceCollectionExtensions
 
         // Microsoft.Identity.Web reads the "AzureAd" section to build the single-tenant authority.
         var entra = EntraOptions.From(configuration);
-        // The API registration (backend app when OBO is enabled, otherwise the single SPA+API app).
-        configuration["AzureAd:ClientId"] = entra.ApiClientId;
+        // The backend API registration is the resource this API protects (never the SPA registration).
+        configuration["AzureAd:ClientId"] = entra.BackendClientId;
         configuration["AzureAd:TenantId"] = entra.TenantId;
-        configuration["AzureAd:Audience"] = $"api://{entra.ApiClientId}";
+        configuration["AzureAd:Audience"] = $"api://{entra.BackendClientId}";
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApi(
@@ -73,6 +73,9 @@ public static class SecurityServiceCollectionExtensions
 
         builder.Services.AddSingleton<IAuthorizationHandler, TenantMemberHandler>();
         builder.Services.AddSingleton<IAuthorizationHandler, AllowedGroupHandler>();
+
+        // The SPA bundle in wwwroot must have been built for the same backend registration (fail fast otherwise).
+        builder.Services.AddHostedService<SpaBundleConsistencyCheck>();
         builder.Services.AddAuthorizationBuilder()
             .AddPolicy(AuthorizationPolicies.ChatScope, corporateUserPolicy)
             // Secure by default: endpoints without explicit metadata get the same policy.
