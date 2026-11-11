@@ -22,8 +22,14 @@ param entraTenantId string = tenant().tenantId
 @description('Service Management Reference GUID (required by some orgs for Entra app registration)')
 param serviceManagementReference string = ''
 
-@description('Enable OBO (On-Behalf-Of) flow for user-delegated access to Agent Service (secretless via FIC)')
+@description('Enable OBO: the backend calls Foundry with the user identity (secretless via FIC). Requires per-user Foundry RBAC and admin consent. Default false = managed identity.')
 param enableObo bool = false
+
+@description('Add http://localhost redirect URIs to the SPA registration (development only)')
+param entraAllowLocalhostRedirects bool = false
+
+@description('Grant tenant-wide admin consent SPA -> backend Chat.ReadWrite (requires an Entra admin role)')
+param entraGrantSpaAdminConsent bool = false
 
 @description('Container image for web service (set by postprovision hook)')
 param webImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'  // Placeholder during initial provision
@@ -31,7 +37,7 @@ param webImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'  // Place
 @description('Pinned Foundry agent version (empty = newest published version)')
 param aiAgentVersion string = ''
 
-@description('Default tags applied by Azure Policy (optional)')
+@description('CONSEIN governance tags (Agente, Entorno, Plataforma), applied to the resource group and every resource. Omitting them would delete the existing tags of the resource group on provision.')
 param defaultTags object = {}
 
 // ---------------------------------------------------------------------------
@@ -114,6 +120,8 @@ module entraApp 'entra-app.bicep' = {
     serviceManagementReference: serviceManagementReference
     enableObo: enableObo
     allowedGroupId: entraAllowedGroupId
+    allowLocalhostRedirects: entraAllowLocalhostRedirects
+    grantSpaAdminConsent: entraGrantSpaAdminConsent
   }
 }
 
@@ -130,9 +138,10 @@ module app 'main-app.bicep' = {
     aiAgentEndpoint: aiAgentEndpoint
     aiAgentId: aiAgentId
     aiAgentVersion: aiAgentVersion
-    entraSpaClientId: entraApp.outputs.clientAppId
+    entraFrontendClientId: entraApp.outputs.frontendClientId
     entraTenantId: entraTenantId
-    entraBackendClientId: enableObo ? entraApp.outputs.backendClientAppId : ''
+    entraBackendClientId: entraApp.outputs.backendClientId
+    enableObo: enableObo
     entraAllowedGroupId: entraAllowedGroupId
     webImageName: webImageName
     userAssignedIdentityId: infrastructure.outputs.managedIdentityId
@@ -158,9 +167,11 @@ output AZURE_RESOURCE_GROUP_NAME string = rg.name
 output AZURE_CONTAINER_APP_NAME string = app.outputs.webAppName
 output WEB_ENDPOINT string = app.outputs.webEndpoint
 output WEB_IDENTITY_PRINCIPAL_ID string = infrastructure.outputs.managedIdentityPrincipalId
-output ENTRA_SPA_CLIENT_ID string = entraApp.outputs.clientAppId
-output ENTRA_APP_OBJECT_ID string = entraApp.outputs.appObjectId
-output ENTRA_BACKEND_CLIENT_ID string = enableObo ? entraApp.outputs.backendClientAppId : ''
-output ENTRA_BACKEND_APP_OBJECT_ID string = enableObo ? entraApp.outputs.backendAppObjectId : ''
+// Entra outputs (ENTRA_SPA_CLIENT_ID / ENTRA_APP_OBJECT_ID were renamed; see docs/pr/pre-develop-pr-description.md)
+output ENTRA_FRONTEND_CLIENT_ID string = entraApp.outputs.frontendClientId
+output ENTRA_FRONTEND_APP_OBJECT_ID string = entraApp.outputs.frontendAppObjectId
+output ENTRA_BACKEND_CLIENT_ID string = entraApp.outputs.backendClientId
+output ENTRA_BACKEND_APP_OBJECT_ID string = entraApp.outputs.backendAppObjectId
+output ENTRA_BACKEND_SCOPE string = entraApp.outputs.backendChatScope
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = infrastructure.outputs.appInsightsConnectionString
 output APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING string = infrastructure.outputs.appInsightsFrontendConnectionString

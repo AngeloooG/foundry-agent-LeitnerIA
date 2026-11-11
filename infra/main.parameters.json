@@ -58,6 +58,19 @@
     },
     "entraAllowedGroupId": {
       "value": "${ENTRA_ALLOWED_GROUP_ID=}"
+    },
+    "entraAllowLocalhostRedirects": {
+      "value": "${ENTRA_ALLOW_LOCALHOST_REDIRECTS=false}"
+    },
+    "entraGrantSpaAdminConsent": {
+      "value": "${ENTRA_GRANT_SPA_ADMIN_CONSENT=false}"
+    },
+    "defaultTags": {
+      "value": {
+        "Agente": "${TAG_AGENTE=LeitnerIA}",
+        "Entorno": "${TAG_ENTORNO=dev}",
+        "Plataforma": "${TAG_PLATAFORMA=Foundry}"
+      }
     }
   }
 }

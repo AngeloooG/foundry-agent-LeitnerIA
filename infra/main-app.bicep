@@ -7,9 +7,13 @@ param aiAgentEndpoint string
 param aiAgentId string
 @description('Pinned agent version (empty = newest version, re-resolved every 10 minutes)')
 param aiAgentVersion string = ''
-param entraSpaClientId string
+@description('Frontend SPA registration (sign-in only)')
+param entraFrontendClientId string
 param entraTenantId string
-param entraBackendClientId string = ''
+@description('Backend API registration: the only audience accepted by the API')
+param entraBackendClientId string
+@description('Backend calls Foundry On-Behalf-Of the user instead of with the managed identity')
+param enableObo bool = false
 @description('Optional group restriction enforced by the API (empty = every user of the tenant)')
 param entraAllowedGroupId string = ''
 param webImageName string
@@ -41,8 +45,16 @@ var baseEnv = [
     value: 'http://+:8080'
   }
   {
-    name: 'ENTRA_SPA_CLIENT_ID'
-    value: entraSpaClientId
+    name: 'ENTRA_FRONTEND_CLIENT_ID'
+    value: entraFrontendClientId
+  }
+  {
+    name: 'ENTRA_BACKEND_CLIENT_ID'
+    value: entraBackendClientId
+  }
+  {
+    name: 'ENABLE_OBO'
+    value: string(enableObo)
   }
   {
     name: 'ENTRA_TENANT_ID'
@@ -81,12 +93,6 @@ var groupEnv = !empty(entraAllowedGroupId) ? [
   }
 ] : []
 
-var oboEnv = !empty(entraBackendClientId) ? [
-  {
-    name: 'ENTRA_BACKEND_CLIENT_ID'
-    value: entraBackendClientId
-  }
-] : []
 
 // Single Container App - serves both frontend (wwwroot) and backend API
 module webApp './core/host/container-app.bicep' = {
@@ -99,7 +105,7 @@ module webApp './core/host/container-app.bicep' = {
     containerRegistryName: containerRegistryName
     containerImage: webImageName
     targetPort: 8080
-    env: concat(baseEnv, versionEnv, groupEnv, oboEnv)
+    env: concat(baseEnv, versionEnv, groupEnv)
     // Connection strings are ingestion keys: stored as Container Apps secrets, not plain env vars.
     secretEnv: {
       APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString
