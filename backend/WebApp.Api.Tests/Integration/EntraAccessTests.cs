@@ -42,7 +42,7 @@ public class EntraAccessTests
         using var factory = WithoutGroup();
 
         Assert.AreEqual(HttpStatusCode.OK,
-            await CallAsync(factory, TestTokens.Create(audience: $"api://{TestWebApplicationFactory.ClientId}")));
+            await CallAsync(factory, TestTokens.Create(audience: $"api://{TestWebApplicationFactory.BackendClientId}")));
     }
 
     [TestMethod]
@@ -159,7 +159,10 @@ public class EntraAccessTests
     [TestMethod]
     [DataRow("ENTRA_ALLOWED_GROUP_ID", "not-a-guid")]
     [DataRow("ENTRA_TENANT_ID", "PLACEHOLDER_SET_VIA_ENTRA_TENANT_ID_ENV_VAR")]
-    [DataRow("ENTRA_SPA_CLIENT_ID", "")]
+    [DataRow("ENTRA_FRONTEND_CLIENT_ID", "")]
+    [DataRow("ENTRA_BACKEND_CLIENT_ID", "")]
+    [DataRow("ENTRA_BACKEND_CLIENT_ID", "not-a-guid")]
+    [DataRow("ENTRA_SPA_CLIENT_ID", "00000000-0000-0000-0000-000000000001")]
     public void InvalidEntraConfiguration_FailsAtStartup(string key, string value)
     {
         using var factory = new TestWebApplicationFactory(

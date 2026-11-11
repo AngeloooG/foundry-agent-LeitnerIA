@@ -14,10 +14,11 @@ namespace WebApp.Api.Tests;
 public class EntraOptionsTests
 {
     private const string Tenant = "00000000-0000-0000-0000-000000000002";
-    private const string Client = "00000000-0000-0000-0000-000000000001";
+    private const string Frontend = "00000000-0000-0000-0000-000000000001";
+    private const string Backend = "00000000-0000-0000-0000-0000000000b1";
 
     private static EntraOptions Valid(string? group = null) =>
-        new() { TenantId = Tenant, ClientId = Client, AllowedGroupId = group };
+        new() { TenantId = Tenant, FrontendClientId = Frontend, BackendClientId = Backend, AllowedGroupId = group };
 
     [TestMethod]
     public void TenantAndClient_WithoutGroup_IsValid()
@@ -41,9 +42,33 @@ public class EntraOptionsTests
     }
 
     [TestMethod]
-    public void MissingTenantOrClient_IsInvalid()
+    public void MissingTenantFrontendAndBackend_AreAllReported()
     {
-        Assert.AreEqual(2, new EntraOptions().Validate().Count());
+        Assert.AreEqual(3, new EntraOptions().Validate().Count());
+    }
+
+    [TestMethod]
+    public void SameFrontendAndBackend_IsInvalid()
+    {
+        var options = Valid();
+        options.BackendClientId = Frontend;
+
+        StringAssert.Contains(options.Validate().Single(), EntraOptions.BackendClientIdVariable);
+    }
+
+    [TestMethod]
+    public void LegacySpaVariable_IsRejected()
+    {
+        var options = Valid();
+        options.LegacyVariablePresent = true;
+
+        StringAssert.Contains(options.Validate().Single(), EntraOptions.LegacySpaClientIdVariable);
+    }
+
+    [TestMethod]
+    public void ApiScope_TargetsTheBackendRegistration()
+    {
+        Assert.AreEqual($"api://{Backend}/Chat.ReadWrite", Valid().ApiScope);
     }
 
     [TestMethod]
@@ -53,7 +78,8 @@ public class EntraOptionsTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ENTRA_TENANT_ID"] = Tenant,
-                ["ENTRA_SPA_CLIENT_ID"] = Client,
+                ["ENTRA_FRONTEND_CLIENT_ID"] = Frontend,
+                ["ENTRA_BACKEND_CLIENT_ID"] = Backend,
                 ["ENTRA_ALLOWED_GROUP_ID"] = "  ",
             })
             .Build();
@@ -65,9 +91,9 @@ public class EntraOptionsTests
     }
 
     [TestMethod]
-    public void Audiences_IncludeV1AndV2Forms()
+    public void Audiences_AreOnlyTheBackendRegistration()
     {
-        CollectionAssert.AreEqual(new[] { Client, $"api://{Client}" }, Valid().Audiences.ToArray());
+        CollectionAssert.AreEqual(new[] { Backend, $"api://{Backend}" }, Valid().Audiences.ToArray());
     }
 }
 
@@ -88,7 +114,7 @@ public class CorporateAccessHandlerTests
     }
 
     private static AllowedGroupHandler GroupHandler(string? group) =>
-        new(Options.Create(new EntraOptions { TenantId = Tenant, ClientId = Tenant, AllowedGroupId = group }),
+        new(Options.Create(new EntraOptions { TenantId = Tenant, AllowedGroupId = group }),
             NullLogger<AllowedGroupHandler>.Instance);
 
     [TestMethod]
@@ -115,7 +141,7 @@ public class CorporateAccessHandlerTests
     [TestMethod]
     public async Task TenantRequirement_RejectsOtherTenant()
     {
-        var handler = new TenantMemberHandler(Options.Create(new EntraOptions { TenantId = Tenant, ClientId = Tenant }));
+        var handler = new TenantMemberHandler(Options.Create(new EntraOptions { TenantId = Tenant }));
 
         Assert.IsTrue(await EvaluateAsync(handler, new TenantMemberRequirement(), User()));
         Assert.IsFalse(await EvaluateAsync(handler, new TenantMemberRequirement(), User(tid: Guid.NewGuid().ToString())));
@@ -180,7 +206,7 @@ public class AllowedGroupLoggingTests
         const string memberOf = "66666666-7777-8888-9999-000000000000";
         var logger = new CapturingLogger<AllowedGroupHandler>();
         var handler = new AllowedGroupHandler(
-            Options.Create(new EntraOptions { TenantId = tenant, ClientId = tenant, AllowedGroupId = allowed }), logger);
+            Options.Create(new EntraOptions { TenantId = tenant, AllowedGroupId = allowed }), logger);
         var user = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim("tid", tenant), new Claim("oid", "user-oid"), new Claim("groups", memberOf),

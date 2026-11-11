@@ -23,7 +23,7 @@ public static class TestTokens
     public static string Create(
         string tenantId = TestWebApplicationFactory.TenantId,
         string? issuer = null,
-        string audience = TestWebApplicationFactory.ClientId,
+        string audience = TestWebApplicationFactory.BackendClientId,
         string scopes = "Chat.ReadWrite",
         string[]? groups = null,
         bool hasGroupsOverage = false,

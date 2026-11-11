@@ -35,7 +35,10 @@ public sealed class TestWebApplicationFactory(
     bool useRealJwt = false) : WebApplicationFactory<Program>
 {
     public const string TenantId = "00000000-0000-0000-0000-000000000002";
-    public const string ClientId = "00000000-0000-0000-0000-000000000001";
+    /// <summary>SPA registration (sign-in only, never an accepted audience).</summary>
+    public const string FrontendClientId = "00000000-0000-0000-0000-000000000001";
+    /// <summary>Backend API registration (the only accepted audience).</summary>
+    public const string BackendClientId = "00000000-0000-0000-0000-0000000000b1";
 
     public InMemoryConversationStore Store { get; } = new();
     public FakeAgentGateway Agent { get; } = new();
@@ -47,7 +50,8 @@ public sealed class TestWebApplicationFactory(
         // UseSetting values are visible while Program.cs builds its services.
         builder.UseSetting("AI_AGENT_ENDPOINT", "https://example.invalid/api/projects/test");
         builder.UseSetting("AI_AGENT_ID", "test-agent");
-        builder.UseSetting("ENTRA_SPA_CLIENT_ID", ClientId);
+        builder.UseSetting("ENTRA_FRONTEND_CLIENT_ID", FrontendClientId);
+        builder.UseSetting("ENTRA_BACKEND_CLIENT_ID", BackendClientId);
         builder.UseSetting("ENTRA_TENANT_ID", TenantId);
         builder.UseSetting("Uploads:CleanupEnabled", "false");
         builder.UseSetting("RateLimiting:ChatPermitsPerMinute", chatPermitsPerMinute.ToString());
@@ -130,7 +134,9 @@ public sealed class TestAuthHandler(
             new("oid", oid.ToString()),
             new("tid", tid),
             new("scp", scopes),
+            // Same display name and UPN for every test user on purpose: ownership must rely on oid only.
             new(ClaimTypes.Name, "Test User"),
+            new("preferred_username", "shared.user@consein.example"),
         };
         if (Request.Headers.TryGetValue(GroupsHeader, out var groups))
             claims.AddRange(groups.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries).Select(g => new Claim("groups", g.Trim())));

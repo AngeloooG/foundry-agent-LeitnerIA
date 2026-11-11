@@ -15,15 +15,9 @@ namespace WebApp.Api.Tests.Integration;
 [TestClass]
 public class EntraAuditTests
 {
-    private const string BackendClientId = "00000000-0000-0000-0000-0000000000b1";
+    private const string BackendClientId = TestWebApplicationFactory.BackendClientId;
+    private const string FrontendClientId = TestWebApplicationFactory.FrontendClientId;
     private const string AllowedGroup = "11111111-2222-3333-4444-555555555555";
-
-    private static readonly Dictionary<string, string?> OboSettings = new()
-    {
-        ["ENTRA_BACKEND_CLIENT_ID"] = BackendClientId,
-        // Required by FoundryOptions when OBO is configured (not used: Foundry is faked).
-        ["MANAGED_IDENTITY_CLIENT_ID"] = "00000000-0000-0000-0000-0000000000c1",
-    };
 
     private static HttpClient ClientWithToken(TestWebApplicationFactory factory, string token)
     {
@@ -38,40 +32,32 @@ public class EntraAuditTests
     // ------------------------------------------------------------------ 1. Audience
 
     [TestMethod]
-    public async Task SingleRegistration_AcceptsOnlyTheApiAppAudience()
+    public async Task BackendAudience_BothForms_AreAccepted()
     {
         using var factory = new TestWebApplicationFactory(useRealJwt: true);
 
-        Assert.AreEqual(HttpStatusCode.OK, await GetAsync(factory, TestTokens.Create(audience: $"api://{TestWebApplicationFactory.ClientId}")));
-        Assert.AreEqual(HttpStatusCode.OK, await GetAsync(factory, TestTokens.Create(audience: TestWebApplicationFactory.ClientId)));
-        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: "api://arbitrary-app")));
-        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: "https://graph.microsoft.com")));
-    }
-
-    [TestMethod]
-    public async Task SeparateRegistrations_BackendAudience_IsAccepted()
-    {
-        using var factory = new TestWebApplicationFactory(useRealJwt: true, settings: OboSettings);
-
-        Assert.AreEqual(HttpStatusCode.OK, await GetAsync(factory, TestTokens.Create(audience: $"api://{BackendClientId}")));
         Assert.AreEqual(HttpStatusCode.OK, await GetAsync(factory, TestTokens.Create(audience: BackendClientId)));
+        Assert.AreEqual(HttpStatusCode.OK, await GetAsync(factory, TestTokens.Create(audience: $"api://{BackendClientId}")));
     }
 
     [TestMethod]
-    public async Task SeparateRegistrations_FrontendClientIdAsAudience_IsRejected()
+    public async Task FrontendClientIdAsAudience_IsRejected()
     {
-        using var factory = new TestWebApplicationFactory(useRealJwt: true, settings: OboSettings);
+        using var factory = new TestWebApplicationFactory(useRealJwt: true);
 
-        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: TestWebApplicationFactory.ClientId)));
-        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: $"api://{TestWebApplicationFactory.ClientId}")));
+        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: FrontendClientId)));
+        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: $"api://{FrontendClientId}")));
     }
 
     [TestMethod]
-    public async Task SeparateRegistrations_ArbitraryAudience_IsRejected()
+    [DataRow("api://arbitrary-app")]
+    [DataRow("https://graph.microsoft.com")]
+    [DataRow("00000003-0000-0000-c000-000000000000")]
+    public async Task ArbitraryAudience_IsRejected(string audience)
     {
-        using var factory = new TestWebApplicationFactory(useRealJwt: true, settings: OboSettings);
+        using var factory = new TestWebApplicationFactory(useRealJwt: true);
 
-        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: "api://arbitrary-app")));
+        Assert.AreEqual(HttpStatusCode.Unauthorized, await GetAsync(factory, TestTokens.Create(audience: audience)));
     }
 
     [TestMethod]
@@ -79,8 +65,7 @@ public class EntraAuditTests
     {
         using var factory = new TestWebApplicationFactory(useRealJwt: true, settings: new Dictionary<string, string?>
         {
-            ["ENTRA_BACKEND_CLIENT_ID"] = TestWebApplicationFactory.ClientId,
-            ["MANAGED_IDENTITY_CLIENT_ID"] = "00000000-0000-0000-0000-0000000000c1",
+            ["ENTRA_BACKEND_CLIENT_ID"] = FrontendClientId,
         });
 
         var exception = Assert.ThrowsExactly<Microsoft.Extensions.Options.OptionsValidationException>(() => factory.CreateClient());
@@ -176,7 +161,7 @@ public class EntraAuditTests
 
         foreach (var secret in new[]
                  {
-                     TestWebApplicationFactory.TenantId, TestWebApplicationFactory.ClientId, AllowedGroup,
+                     TestWebApplicationFactory.TenantId, FrontendClientId, BackendClientId, AllowedGroup,
                      TestTokens.OtherTenantId, "login.microsoftonline.com", "sts.windows.net", "arbitrary-app",
                      "issuer", "audience", "tid", "scp", "groups", "IDX",
                  })

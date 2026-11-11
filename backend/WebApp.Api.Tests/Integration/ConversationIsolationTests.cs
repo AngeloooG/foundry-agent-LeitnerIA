@@ -85,6 +85,60 @@ public class ConversationIsolationTests
     }
 
     [TestMethod]
+    public async Task Owner_CanContinueTheConversation()
+    {
+        var conversationId = await StartConversationAsync(UserA);
+
+        var response = await _factory.CreateClientFor(UserA).PostAsJsonAsync("/api/chat/stream",
+            new { message = "continúa", conversationId });
+        var events = await ReadSseEventsAsync(response);
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.AreEqual(conversationId, events[0].GetProperty("conversationId").GetString());
+        Assert.AreEqual(2, _factory.Agent.Calls.Count);
+        Assert.AreEqual(1, _factory.Store.All.Count, "Continuing must not create a new conversation.");
+    }
+
+    [TestMethod]
+    public async Task OtherUser_CannotDeleteTheConversation()
+    {
+        var conversationId = await StartConversationAsync(UserA);
+
+        var response = await _factory.CreateClientFor(UserB).DeleteAsync($"/api/conversations/{conversationId}");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode, "There is no delete endpoint; nothing may be deleted.");
+        Assert.AreEqual(1, _factory.Store.All.Count);
+        Assert.AreEqual(HttpStatusCode.OK, (await _factory.CreateClientFor(UserA).GetAsync($"/api/conversations/{conversationId}/messages")).StatusCode);
+    }
+
+    [TestMethod]
+    public async Task ForeignAndMissingConversations_AreIndistinguishable()
+    {
+        var conversationId = await StartConversationAsync(UserA);
+        var userB = _factory.CreateClientFor(UserB);
+
+        var foreign = await userB.GetAsync($"/api/conversations/{conversationId}/messages");
+        var missing = await userB.GetAsync("/api/conversations/conv_9999/messages");
+
+        static string WithoutTraceId(string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"traceId\":\"[^\"]*\"", "");
+        Assert.AreEqual(missing.StatusCode, foreign.StatusCode);
+        Assert.AreEqual(WithoutTraceId(await missing.Content.ReadAsStringAsync()), WithoutTraceId(await foreign.Content.ReadAsStringAsync()));
+        Assert.IsFalse((await foreign.Content.ReadAsStringAsync()).Contains(conversationId), "The response must not echo the id.");
+    }
+
+    [TestMethod]
+    public async Task Ownership_UsesOid_NotNameOrEmail()
+    {
+        // Both test users share display name and preferred_username (see TestAuthHandler); only oid differs.
+        var conversationId = await StartConversationAsync(UserA);
+
+        var asOther = await _factory.CreateClientFor(UserB).GetAsync($"/api/conversations/{conversationId}/messages");
+
+        Assert.AreEqual(HttpStatusCode.NotFound, asOther.StatusCode);
+        Assert.AreEqual(UserA, _factory.Store.All.Single().Metadata[ConversationOwnership.OwnerMetadataKey]);
+    }
+
+    [TestMethod]
     public async Task OtherUser_CannotReadMessages()
     {
         var conversationId = await StartConversationAsync(UserA);
