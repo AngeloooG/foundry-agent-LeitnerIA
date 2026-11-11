@@ -11,28 +11,15 @@ This skill covers writing unit tests for the frontend using **Vitest**.
 ## Project Structure
 
 ```text
-frontend/
-├── package.json          # vitest + jsdom devDependencies
-├── vite.config.ts        # Vitest config inline
-└── src/
-    ├── config/
-    │   └── __tests__/
-    │       └── authConfig.test.ts
-    ├── utils/
-    │   ├── citationParser.ts
-    │   ├── sseParser.ts
-    │   ├── fileAttachments.ts
-    │   └── __tests__/
-    │       ├── citationParser.test.ts
-    │       ├── sseParser.test.ts
-    │       └── fileAttachments.test.ts
-    ├── services/
-    │   └── __tests__/
-    │       └── chatService.test.ts
-    └── reducers/
-        ├── appReducer.ts
-        └── __tests__/
-            └── appReducer.test.ts    # Includes state shape snapshot
+frontend/src/
+├── config/__tests__/authConfig.test.ts
+├── components/markdown/__tests__/SafeMarkdown.test.tsx        # XSS, images, links (security regressions)
+└── features/battlecard/
+    ├── api/__tests__/agentStreamClient.test.ts                # SSE framing, errors (mock fetch)
+    ├── api/__tests__/agentAttachments.test.ts                 # limits, duplicates, total size
+    ├── model/__tests__/battlecardForm.test.ts                 # validation, prompt builder
+    ├── model/__tests__/fileAttachments.test.ts
+    └── state/__tests__/consoleState.test.ts                   # pure reducer
 ```
 
 ## Configuration
@@ -53,30 +40,20 @@ export default defineConfig({
 ## Test Anatomy
 
 ```typescript
-import { describe, it, expect } from "vitest";
-import { parseCitations, deduplicateAnnotations } from "../citationParser";
+import { describe, expect, it } from "vitest";
+import { consoleReducer, createInitialConsoleState } from "../consoleState";
 
-describe("citationParser", () => {
-  describe("parseCitations", () => {
-    it("returns empty array for empty input", () => {
-      expect(parseCitations("", [])).toEqual([]);
+describe("consoleReducer", () => {
+  it("appends streamed chunks to the agent message", () => {
+    let state = consoleReducer(createInitialConsoleState(), {
+      type: "runStarted",
+      userMessage: { id: "u1", role: "user", text: "Hola" },
+      agentMessageId: "a1",
+      withAttachments: false,
     });
+    state = consoleReducer(state, { type: "chunkReceived", messageId: "a1", chunk: "Bat" });
 
-    it("extracts citation markers from text", () => {
-      const text = "Hello [1] world [2]";
-      const result = parseCitations(text, annotations);
-      expect(result).toHaveLength(2);
-    });
-  });
-
-  describe("deduplicateAnnotations", () => {
-    it("removes duplicate annotations by URL", () => {
-      const annotations = [
-        { url: "https://example.com", title: "Example" },
-        { url: "https://example.com", title: "Example Duplicate" },
-      ];
-      expect(deduplicateAnnotations(annotations)).toHaveLength(1);
-    });
+    expect(state.messages.at(-1)?.text).toBe("Bat");
   });
 });
 ```
@@ -95,28 +72,24 @@ npm run test:run
 npm run test:coverage
 
 # Run specific file
-npx vitest run src/utils/__tests__/citationParser.test.ts
+npx vitest run src/features/battlecard/state/__tests__/consoleState.test.ts
 
 # Run tests matching pattern
-npx vitest run --testNamePattern="parseCitations"
+npx vitest run --testNamePattern="consoleReducer"
 ```
 
 ## Testable Units in This Project
 
-### Utils (Pure Functions - Easy to Test)
-
-| File | Functions to Test |
-|------|-------------------|
-| `citationParser.ts` | `parseContentWithCitations` |
-| `sseParser.ts` | `parseSseLine`, `splitSseBuffer` |
-| `fileAttachments.ts` | `validateFile`, `validateImageFile`, `validateDocumentFile`, `validateFileCount`, `getEffectiveMimeType`, `convertFilesToDataUris` |
-| `errorHandler.ts` | `getUserFriendlyMessage`, `createAppError`, `getErrorCodeFromResponse`, `parseErrorFromResponse`, `getErrorCodeFromMessage`, `isTokenExpiredError`, `isNetworkError`, `retryWithBackoff` |
-
-### Reducers (Pure Functions - Easy to Test)
+### Pure modules (easy to test)
 
 | File | What to Test |
 |------|--------------|
-| `appReducer.ts` | All action types, state transitions, immutability |
+| `features/battlecard/state/consoleState.ts` | Every action, immutability, reset |
+| `features/battlecard/api/agentStreamClient.ts` | SSE framing across reads, CRLF, malformed events, error events, ProblemDetails (mock `fetch`) |
+| `features/battlecard/api/agentAttachments.ts` | Per-type counts, total size cap, duplicates |
+| `features/battlecard/model/battlecardForm.ts` | Validation and prompt builder |
+| `features/battlecard/model/fileAttachments.ts` | `validateFile`, `getEffectiveMimeType`, `convertFilesToDataUris` |
+| `components/markdown/linkPolicy.ts` + `SafeMarkdown.tsx` | Security regressions (render with `react-dom/server`) |
 
 ### Components (Require React Testing Library)
 

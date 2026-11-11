@@ -247,7 +247,7 @@ The SDK provides several annotation types for citations (from `OpenAI.Responses`
 | File Path | `FilePathMessageAnnotation` | Code interpreter output | `FileId`, `Index` |
 | Container Citation | `ContainerFileCitationMessageAnnotation` | Container file citations | `FileId`, `Filename`, `ContainerId`, `StartIndex`, `EndIndex` |
 
-**Note**: `FileCitationMessageAnnotation` uses `Index` (not `StartIndex`/`EndIndex`) per the SDK. See `ExtractAnnotations()` in `AgentFrameworkService.cs` for mapping to `AnnotationInfo`.
+**Note**: `FileCitationMessageAnnotation` uses `Index` (not `StartIndex`/`EndIndex`) per the SDK. See `AnnotationMapper.Extract()` in `FoundryAgentGateway.cs` for mapping to `AnnotationInfo`.
 
 ### Container File Download
 

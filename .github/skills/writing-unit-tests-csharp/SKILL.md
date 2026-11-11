@@ -94,7 +94,7 @@ dotnet test --collect:"XPlat Code Coverage"
 
 | Class | Testing Approach |
 |-------|------------------|
-| `AgentFrameworkService` | Use `validating-ui-features` skill with Playwright for integration tests |
+| Foundry adapters | Replace `IAgentGateway`/`IConversationStore` with fakes in `WebApplicationFactory` (see `Integration/TestWebApplicationFactory.cs`) |
 
 ## Test Naming Convention
 

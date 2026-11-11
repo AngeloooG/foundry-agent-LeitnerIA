@@ -19,10 +19,10 @@ All hooks start a PowerShell transcript automatically and write logs to `.azure/
 
 | Hook | Purpose | Key Actions | Outputs |
 |------|---------|-------------|---------|
-| **preprovision.ps1** | Discover AI Foundry + configure agent | • Discovers AI Foundry resources<br>• Auto-detects tenant ID<br>• Discovers agent in project | AI Foundry env vars |
-| **postprovision.ps1** | Configure Entra app + RBAC + local config | • Sets `identifierUri` on Entra app (can't be done in Bicep — self-references `appId`)<br>• Updates redirect URIs with production URL<br>• Assigns `Cognitive Services OpenAI Contributor` + `Azure AI Developer` roles to AI Foundry<br>• Generates local dev config files (`.env`, `.env.local`) | Configured Entra app + RBAC + local config |
+| **preprovision.ps1** | Discover AI Foundry + configure agent | • Discovers AI Foundry resources (fails instead of guessing when several accounts/projects exist; set `AI_FOUNDRY_RESOURCE_NAME` / `AI_FOUNDRY_PROJECT_NAME`)<br>• Auto-detects tenant ID<br>• Discovers agent in project | AI Foundry env vars |
+| **postprovision.ps1** | Configure Entra app + RBAC + local config | • Sets `identifierUri` on Entra app (can't be done in Bicep — self-references `appId`)<br>• Redirect URIs: production URL; localhost only when `ENTRA_ALLOW_LOCALHOST_REDIRECTS=true`<br>• Assigns **Foundry User** (role id `53ca6127-…`) to the web identity on the Foundry **project**; legacy roles removed with `REMOVE_LEGACY_FOUNDRY_ROLES=true`<br>• Assigns the deploying user and `ENTRA_ALLOWED_GROUP_ID` to the enterprise app (user assignment is required)<br>• Generates local dev config files (`.env`, `.env.local`, identifiers only) | Configured Entra app + RBAC + local config |
 | **predeploy.ps1** | Build container image | • Detects Docker availability<br>• Passes `APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING` as Docker build arg for frontend browser telemetry<br>• Local Docker build + push OR ACR cloud build<br>• Updates Container App if it exists | Container image in ACR |
-| **postdown.ps1** | Cleanup (optional) | • Removes RBAC assignment<br>• Deletes Entra app (Graph resources aren't tied to RGs)<br>• Optionally removes Docker images | Clean slate |
+| **postdown.ps1** | Cleanup | • Removes Foundry role assignments (current and legacy, account and project scope)<br>• Deletes the Entra SPA app **and the OBO backend app** (with its tenant-wide consent)<br>• Deletes local config files | Clean slate |
 
 ## Entra App Registration
 

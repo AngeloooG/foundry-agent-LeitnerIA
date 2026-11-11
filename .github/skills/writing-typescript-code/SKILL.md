@@ -142,16 +142,7 @@ if (!response.ok) throw new Error(`API error: ${response.status}`);
 
 ## npm Dependencies
 
-`frontend/.npmrc` sets `legacy-peer-deps=true` automatically — no flag needed when running from `frontend/`.
-
-**Gotcha**: `legacy-peer-deps` skips automatic peer dependency installation. If a package requires peer deps, add them explicitly to `package.json`.
-
-**Example**: `@lexical/yjs` requires `yjs` as a peer dependency. Since peer deps aren't auto-installed, `yjs` must be in `package.json` directly.
-
-**Before committing package changes**, verify with:
-```bash
-npm ci  # Fails if lock file is out of sync with package.json
-```
+No `.npmrc` flags are needed (peer dependencies resolve cleanly). Before committing package changes run `npm ci` (fails if the lock file is out of sync) and `npm audit --omit=dev`.
 
 ## Common Mistakes
 
@@ -159,7 +150,7 @@ npm ci  # Fails if lock file is out of sync with package.json
 - ❌ Calling hooks conditionally or in loops
 - ❌ Using `any` type
 - ❌ Storing tokens in component state
-- ❌ Running `npm install` outside `frontend/` (misses `.npmrc` config)
+- ❌ Rendering agent output with anything other than `SafeMarkdown`
 - ❌ Missing memoization in custom hooks (causes infinite re-renders)
 - ❌ Returning new objects from hooks without `useMemo`
 
@@ -169,83 +160,30 @@ npm ci  # Fails if lock file is out of sync with package.json
 
 | Concern | Implementation |
 |---------|----------------|
-| **State Management** | Centralized Context + `useReducer` (`AppContext`) with discriminated action union |
-| **Authentication** | MSAL redirect flow; silent token refresh; `useAuth` hook |
-| **Chat Streaming** | SSE in `ChatService` with abort controllers for cancellation |
-| **Accessibility** | Live region (`aria-live`), aria labels, focus management |
-| **Logging** | Dev-only diff-based logger |
+| **Structure** | Feature folders: `src/features/battlecard` (console) and `src/features/landing` (home) |
+| **State** | `AgentConsoleProvider` (mounted above the routes) + pure `consoleReducer` (`state/consoleState.ts`) — single source of truth |
+| **Authentication** | MSAL redirect flow, `sessionStorage` cache; `useAuth().getAccessToken()` (silent → redirect) |
+| **Streaming** | `api/agentStreamClient.ts` (fetch + SSE parser); the provider owns the `AbortController` and a ref guard against double submits |
+| **Rendering agent output** | `components/markdown/SafeMarkdown.tsx` (rehype-sanitize, images blocked, link policy) |
+| **Accessibility** | `Field` links label/help/error to the control; `aria-live` chat body |
 
-## Project-Specific: Key Components
+## Project-Specific: Key Modules
 
-| Component | Purpose |
-|-----------|---------|
-| `AgentChat.tsx` | Container wiring chat state to controlled `ChatInterface` |
-| `ChatInterface.tsx` | Stateless controlled UI; renders messages, input, errors, BuiltWithBadge |
-| `chat/AssistantMessage.tsx` | Memoized assistant message with streaming + citation footnotes |
-| `chat/UserMessage.tsx` | Memoized user message with image thumbnail previews |
-| `chat/ChatInput.tsx` | File uploads, character counter, cancel streaming button |
-| `chat/CitationMarker.tsx` | Inline superscript citation badge with tooltip + click handler |
-| `core/Markdown.tsx` | Renders markdown with inline citation markers via `ContentWithCitations` |
-| `core/BuiltWithBadge.tsx` | \"Built with Microsoft Foundry\" link badge (centered under input) |
-
-## Project-Specific: Citation System
-
-**Parser**: `frontend/src/utils/citationParser.ts`
-
-Handles Azure AI Agent citation formats:
-- Assistants/Responses API: `【4:0†source】`, `【13†myfile.pdf】`
-- Azure OpenAI On Your Data: `[doc1]`, `[doc2]`
-
-**Flow**:
-1. `parseContentWithCitations()` replaces placeholders with `[N]` markers
-2. `Markdown.tsx` renders `CitationMarker` components for each `[N]`
-3. Clicking inline marker scrolls to footnote (with highlight animation) or opens URL
-4. `AssistantMessage.tsx` renders footnote list with icons by type (URI/file/document)
-
-**Key Types** (`frontend/src/types/chat.ts`):
-- `IAnnotation` - Citation metadata (type, label, url, fileId, quote, textToReplace)
-- `IndexedCitation` - Parsed citation with display index
-
-## Project-Specific: File Upload Validation
-
-**Limits**: 5MB per file, max 5 files total
-
-**See**: `frontend/src/utils/fileAttachments.ts` for `validateImageFile()` and `validateFileCount()`
-
-## Project-Specific: ChatService
-
-**File**: `frontend/src/services/chatService.ts`
-
-Key patterns:
-- Class-based service with `Dispatch<AppAction>` for state updates
-- `AbortController` for stream cancellation (`cancelStream()`)
-- `retryWithBackoff()` for resilient API calls (3 retries, 1s initial delay)
-- SSE parsing via `parseSseLine()` and `splitSseBuffer()` utilities
-- Duplicate chunk suppression to prevent UI flicker
-
-**Methods**:
-| Method | Purpose |
+| Module | Purpose |
 |--------|---------|
-| `sendMessage()` | Orchestrates auth, file conversion, streaming |
-| `cancelStream()` | Aborts active stream, dispatches `CHAT_CANCEL_STREAM` |
-| `clearChat()` | Resets conversation state |
-| `clearError()` | Clears error without affecting chat |
+| `features/battlecard/AgentConsolePage.tsx` | Page composition |
+| `components/BattlecardForm.tsx` | Five guided questions + optional context; prepares an editable prompt |
+| `components/AttachmentPicker.tsx` | Drop zone, validation messages, selected files |
+| `components/ChatPanel.tsx` | Messages, progress, references, quick prompts, composer |
+| `model/battlecardForm.ts` | Pure validation and prompt builder |
+| `api/agentAttachments.ts` | Attachment limits (mirror the backend) and data URI conversion |
 
 ## Project-Specific: Adding Features
 
-1. **Extend state**: Add discriminated action to `AppAction` union in `frontend/src/types/appState.ts`
-2. **Handle in reducer**: Update `frontend/src/reducers/appReducer.ts` (keep pure, no side effects)
-3. **Create service method**: Add to `ChatService` if network interaction needed
-4. **Wire container**: Update `AgentChat.tsx` to dispatch actions
-5. **Update UI**: Pass callbacks to controlled component
-
-## Project-Specific: Accessibility Checklist
-
-- ✅ Live region announces latest assistant message
-- ✅ `aria-busy` attribute on messages container during streaming
-- ✅ Buttons have `aria-label` when icon-only
-- ✅ Focus returns to input after sending
-- ✅ Character counter linked via `aria-describedby`
+1. **Add an action** to `ConsoleAction` and handle it in `consoleReducer` (pure, tested in `state/__tests__`).
+2. **Side effects** (network, timers) go in `AgentConsoleProvider` actions, never in the reducer.
+3. **UI** reads `useAgentConsole()` and calls `actions.*`.
+4. **Copy** goes to `model/consoleContent.ts`; limits to `config/appConfig.ts` (keep aligned with the backend).
 
 ## Related Skills
 
