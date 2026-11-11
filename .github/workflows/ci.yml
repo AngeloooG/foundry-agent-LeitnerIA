@@ -1,0 +1,147 @@
+# Continuous integration for LeitnerIA: build, test and security checks.
+# No Azure credentials, no OIDC, no deployment: azd provision/deploy are manual, reviewed steps.
+name: CI
+
+on:
+  pull_request:
+    branches: [main, Develop-LeitnerIA, pre-develop]
+  push:
+    branches: [main, Develop-LeitnerIA, pre-develop]
+  workflow_dispatch:
+
+# Least privilege for GITHUB_TOKEN. Jobs that need more declare it explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Public, non-functional identifiers used only to build the bundle in CI (not real app registrations).
+  VITE_ENTRA_TENANT_ID: 00000000-0000-0000-0000-00000000000a
+  VITE_ENTRA_FRONTEND_CLIENT_ID: 00000000-0000-0000-0000-00000000000f
+  VITE_ENTRA_BACKEND_CLIENT_ID: 00000000-0000-0000-0000-00000000000b
+
+jobs:
+  frontend:
+    name: Frontend (build, tests, bundle scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:run
+
+      - name: Scan bundle (secrets, source maps, system prompt canaries)
+        working-directory: .
+        env:
+          # Optional repository secret: distinctive phrases of the agent instructions, one per line.
+          # When it is not configured the canary check is skipped and the secret-pattern checks still run.
+          SYSTEM_PROMPT_CANARIES: ${{ secrets.SYSTEM_PROMPT_CANARIES }}
+        run: node deployment/scripts/scan-bundle.mjs frontend/dist
+
+      - name: npm audit (informational)
+        continue-on-error: true
+        run: npm audit --omit=dev
+
+  backend:
+    name: Backend (build, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # NuGet cache keyed on the project files (the repo has no packages.lock.json). Only public packages are cached.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('backend/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore WebApp.sln
+
+      - name: Build
+        run: dotnet build WebApp.sln -c Release --no-restore
+
+      - name: Test
+        # MSTest.Sdk uses Microsoft.Testing.Platform; arguments are passed through this MSBuild property.
+        run: >-
+          dotnet test WebApp.sln -c Release --no-build
+          -p:TestingPlatformCommandLineArguments="--report-trx --results-directory ${{ github.workspace }}/test-results"
+
+      - name: Vulnerable packages (informational)
+        continue-on-error: true
+        run: dotnet list WebApp.sln package --vulnerable --include-transitive
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: test-results/*.trx
+          if-no-files-found: ignore
+          retention-days: 14
+
+  bicep:
+    name: Bicep (build, lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Lint
+        run: az bicep lint --file infra/main.bicep
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

@@ -1,87 +1,52 @@
-import { useMsal } from "@azure/msal-react";
-import { InteractionRequiredAuthError } from "@azure/msal-browser";
-import { tokenRequest } from "../config/authConfig";
 import { useCallback, useMemo } from "react";
 
+import { InteractionRequiredAuthError } from "@azure/msal-browser";
+import { useMsal } from "@azure/msal-react";
+
+import { tokenRequest } from "../config/authConfig";
+
 /**
- * Authentication hook for MSAL-based authentication.
- * Provides token acquisition and authentication status.
- * 
- * @returns Object with getAccessToken function, authentication status, and user info
- * 
- * @example
- * ```tsx
- * function ProtectedComponent() {
- *   const { getAccessToken, isAuthenticated, user } = useAuth();
- *   
- *   useEffect(() => {
- *     const fetchData = async () => {
- *       const token = await getAccessToken();
- *       if (token) {
- *         // Make authenticated API call
- *       }
- *     };
- *     fetchData();
- *   }, [getAccessToken]);
- *   
- *   if (!isAuthenticated) return <div>Please sign in</div>;
- *   return <div>Welcome, {user?.name}</div>;
- * }
- * ```
+ * Access-token helper for calls to the backend API.
+ *
+ * - Uses the active account (set in main.tsx after login), falling back to the first cached account.
+ * - Tries a silent acquisition first. When user interaction is required (expired session, new consent)
+ *   it starts a full-page redirect, the same interaction type used for login, and returns `null`
+ *   because the page is about to navigate away.
  */
 export const useAuth = () => {
-  const { instance, accounts } = useMsal();
+    const { instance, accounts } = useMsal();
 
-  const getAccessToken = useCallback(async (): Promise<string | null> => {
-    if (accounts.length === 0) {
-      return null;
-    }
-
-    const request = {
-      ...tokenRequest,
-      account: accounts[0],
-    };
-
-    try {
-      // Try silent token acquisition first (uses cached token if valid)
-      const response = await instance.acquireTokenSilent(request);
-      return response.accessToken;
-    } catch (error) {
-      if (error instanceof InteractionRequiredAuthError) {
-        // Fallback to interactive login if silent fails
-        console.warn(
-          "Silent token acquisition failed, prompting for interaction"
-        );
-        try {
-          const response = await instance.acquireTokenPopup(request);
-          return response.accessToken;
-        } catch (popupError) {
-          console.error("Popup login failed:", popupError);
-          return null;
+    const getAccessToken = useCallback(async (): Promise<string | null> => {
+        const account = instance.getActiveAccount() ?? accounts[0];
+        if (!account) {
+            return null;
         }
-      }
-      console.error("Token acquisition error:", error);
-      return null;
-    }
-  }, [instance, accounts]);
 
-  // Memoize computed values
-  const isAuthenticated = useMemo(
-    () => accounts.length > 0,
-    [accounts.length]
-  );
+        const request = { ...tokenRequest, account };
 
-  const user = useMemo(
-    () => accounts[0],
-    [accounts]
-  );
+        try {
+            const response = await instance.acquireTokenSilent(request);
+            return response.accessToken;
+        } catch (error) {
+            if (error instanceof InteractionRequiredAuthError) {
+                await instance.acquireTokenRedirect(request);
+                return null;
+            }
 
-  return useMemo(
-    () => ({
-      getAccessToken,
-      isAuthenticated,
-      user,
-    }),
-    [getAccessToken, isAuthenticated, user]
-  );
+            // Do not log the error object: it can include claims and correlation data.
+            console.error("No se pudo obtener el token de acceso.");
+            return null;
+        }
+    }, [instance, accounts]);
+
+    const user = instance.getActiveAccount() ?? accounts[0];
+
+    return useMemo(
+        () => ({
+            getAccessToken,
+            isAuthenticated: accounts.length > 0,
+            user,
+        }),
+        [getAccessToken, accounts.length, user]
+    );
 };

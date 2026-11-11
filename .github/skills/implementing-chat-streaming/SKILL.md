@@ -10,7 +10,7 @@ description: Provides SSE streaming patterns for the chat API and frontend. Use 
 ```csharp
 app.MapPost("/api/chat/stream", async (
     ChatRequest request,
-    AgentFrameworkService agentService,
+    ChatService chat,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -119,7 +119,7 @@ Key patterns:
 ```csharp
 app.MapPost("/api/chat/stream", async (
     ChatRequest request,
-    AgentFrameworkService agentService,
+    ChatService chat,
     HttpContext httpContext,
     IHostEnvironment env,
     CancellationToken cancellationToken) =>
@@ -151,7 +151,7 @@ app.MapPost("/api/chat/stream", async (
 
 ## Project-Specific: Service Implementation
 
-**See**: `backend/WebApp.Api/Services/AgentFrameworkService.cs`
+**See**: `backend/WebApp.Api/Infrastructure/Foundry/FoundryAgentGateway.cs`
 
 **Key patterns in `StreamMessageAsync`**:
 - Disposal guard before processing
@@ -200,6 +200,6 @@ Changes: { field: before → after }
 
 ## Related Skills
 
-- **writing-csharp-code** - Backend coding standards and AgentFrameworkService patterns
+- **writing-csharp-code** - Backend coding standards and Foundry adapter patterns (ports & adapters)
 - **writing-typescript-code** - Frontend React patterns and ChatService implementation
 - **troubleshooting-authentication** - Token acquisition for authenticated streaming

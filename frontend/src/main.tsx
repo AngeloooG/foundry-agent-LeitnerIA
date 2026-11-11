@@ -13,7 +13,7 @@ import { BrowserRouter } from "react-router";
 import App from "./App";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { msalConfig } from "./config/authConfig";
-import { AppProvider } from "./contexts/AppContext";
+import { AgentConsoleProvider } from "./features/battlecard/state/AgentConsoleProvider";
 import { initTelemetry } from "./services/telemetry";
 
 import "./index.css";
@@ -59,14 +59,23 @@ msalInstance.initialize().then(() => {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <MsalProvider instance={msalInstance}>
-        <AppProvider>
+        <AgentConsoleProvider>
           <ThemeProvider>
             <BrowserRouter>
               <App />
             </BrowserRouter>
           </ThemeProvider>
-        </AppProvider>
+        </AgentConsoleProvider>
       </MsalProvider>
     </React.StrictMode>
   );
+}).catch(() => {
+  // MSAL could not start (blocked storage, invalid configuration...). Show a minimal message instead of a
+  // blank page; textContent avoids injecting any HTML.
+  const rootElement = document.getElementById("root");
+  if (rootElement) {
+    rootElement.textContent =
+      "No se pudo iniciar la autenticación. Recargue la página o contacte a su administrador.";
+  }
+  console.error("MSAL initialization failed.");
 });

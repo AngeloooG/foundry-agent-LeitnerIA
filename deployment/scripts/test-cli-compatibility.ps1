@@ -56,7 +56,7 @@ if ($version) {
 Write-TestHeader "2. Custom Instructions"
 $response = Invoke-CopilotPrompt "COMPATIBILITY TEST: Do you see custom instructions for this repo? Reply with ONLY the project name from the instructions, nothing else."
 Write-Info "Response: $response"
-if ($response -match "foundry-agent-webapp") {
+if ($response -match "LeitnerIA|foundry-agent") {
     Write-Pass "Custom instructions loaded (.github/copilot-instructions.md)"
 } else {
     Write-Fail "Custom instructions not detected in response"

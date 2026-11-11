@@ -1,139 +1,102 @@
-# Backend - ASP.NET Core API
+# LeitnerIA: backend (ASP.NET Core 10)
 
-**AI Assistance**: See `.github/skills/writing-csharp-code/SKILL.md` for coding patterns.
+API que autentica a los usuarios con Entra ID, aplica el aislamiento por usuario y hace de proxy en streaming (SSE) hacia el agente de Azure AI Foundry. También sirve la SPA compilada desde `wwwroot`.
 
-## Overview
+La arquitectura completa está en [../ARCHITECTURE-FLOW.md](../ARCHITECTURE-FLOW.md).
 
-ASP.NET Core 9 Minimal API application that:
-- Serves both the REST API (`/api/*`) and React SPA (single container pattern)
-- Authenticates requests via JWT Bearer tokens from Microsoft Entra ID
-- Communicates with Foundry Agent Service using user-assigned managed identity (with optional OBO)
-- Streams AI agent responses via Server-Sent Events (SSE)
-
-## Key Features
-
-- **Single Container**: Serves both API and frontend from `wwwroot`
-- **JWT Authentication**: Validates tokens with `Chat.ReadWrite` scope
-- **AI Agent Integration**: Azure.AI.Projects (v2 Agents API)
-- **Streaming**: SSE-based chat streaming with cancellation support
-- **Starter Prompts**: Dynamic prompts from agent metadata
-- **Environment-Aware Auth**: ChainedTokenCredential (dev) / User-assigned ManagedIdentity (prod) / OBO (opt-in)
-
-## Project Structure
+## Estructura
 
 ```text
 WebApp.Api/
-├── Program.cs                    # Middleware pipeline + endpoints
-├── Models/                       # Request/response DTOs
-│   ├── ChatRequest.cs
-│   ├── ChatResponse.cs
-│   ├── AgentMetadata.cs
-│   ├── StreamChunk.cs
-│   └── ConversationModels.cs
-├── Services/
-│   └── AgentFrameworkService.cs  # AI Foundry v2 Agents API + streaming
-└── appsettings.json              # Configuration (no secrets)
+  Program.cs                      Composición: servicios, pipeline y endpoints (~70 líneas)
+  Endpoints/                      ChatEndpoints (SSE), ConversationEndpoints, AgentEndpoints, ApiResults
+  Application/                    ChatService, ConversationService, puertos (Ports.cs)
+    Attachments/                  AttachmentValidator (tipos, firmas, tamaños, nombres)
+    Validation/                   ChatRequestValidator
+  Infrastructure/
+    Configuration/                FoundryOptions (validadas al arrancar), DotEnvLoader
+    Foundry/                      FoundryAgentGateway, FoundryConversationStore, FoundryAgentCatalog,
+                                  FoundryClientFactory (MI u OBO), UploadedFilesCleanupService
+  Security/                       Autenticación, autorización, rate limiting, cabeceras, ApiExceptionHandler,
+                                  ConversationOwnership, UserIdentity
+  Observability/ChatMetrics.cs    Métricas OpenTelemetry (tokens, duración, resultado)
+  Models/                         Contratos HTTP y SSE
+WebApp.ServiceDefaults/           OpenTelemetry (Application Insights), health checks, resiliencia de HttpClient
+WebApp.Api.Tests/                 Pruebas unitarias y de integración (WebApplicationFactory + fakes)
 ```
 
-## Running Locally
+## Endpoints
 
-### Prerequisites
-- .NET 10 SDK
-- Azure CLI authenticated (`az login`)
-- `.env` file generated (run `azd up` first)
+| Método y ruta | Descripción |
+|---|---|
+| `POST /api/chat/stream` | Turno de chat; respuesta SSE (`conversationId`, `chunk`, `annotations`, `toolUse`, `mcpApprovalRequest`, `usage`, `done`/`error`) |
+| `GET /api/agent` | Nombre, descripción y starter prompts del agente |
+| `GET /api/conversations?limit=20` | Conversaciones del usuario autenticado |
+| `GET /api/conversations/{id}/messages` | Mensajes de una conversación propia |
+| `GET /api/health`, `/health`, `/alive` | Sondas (anónimas) |
 
-### Start
+Todos los endpoints `/api` excepto `/api/health` exigen un token del tenant configurado con el scope `Chat.ReadWrite` y, si `ENTRA_ALLOWED_GROUP_ID` tiene valor, pertenecer a ese grupo. Las reglas están en `Security/` (`EntraOptions`, `EntraTokenValidation`, `CorporateAccessAuthorization`). Los endpoints que existían en la plantilla, `/api/files/*`, `/api/agent/info` y `DELETE /api/conversations/{id}`, se eliminaron porque exponían archivos o acciones de todos los usuarios.
+
+## Configuración
+
+Variables de entorno, que inyecta azd o Container Apps (en local, las escribe en `.env` el hook `postprovision`):
+
+| Variable | Obligatoria | Descripción |
+|---|---|---|
+| `ENTRA_FRONTEND_CLIENT_ID` | Sí | Registro del SPA (GUID). Nunca es una audiencia aceptada; se usa para rechazar configuraciones ambiguas y verificar el bundle |
+| `ENTRA_TENANT_ID` | Sí | Tenant (GUID) |
+| `AI_AGENT_ENDPOINT` | Sí | `https://<cuenta>.services.ai.azure.com/api/projects/<proyecto>` |
+| `AI_AGENT_ID` | Sí | Nombre del agente (`LeitnerIA`) |
+| `AI_AGENT_VERSION` | No | Versión fija del agente (por defecto, la más reciente) |
+| `MANAGED_IDENTITY_CLIENT_ID` | En Azure | Identidad user-assigned |
+| `ENTRA_BACKEND_CLIENT_ID` | Sí | Registro de la API (GUID, distinto del frontend). Es la **única** audiencia aceptada (`{id}` y `api://{id}`) |
+| `ENABLE_OBO` | No | `true` para llamar a Foundry On-Behalf-Of del usuario (requiere RBAC por usuario y consentimiento). Vacío o `false`: managed identity. Otro valor: la app no arranca |
+| `ENTRA_SPA_CLIENT_ID` | — | **Eliminada.** Si sigue definida, la app no arranca (sustituida por las dos anteriores) |
+| `ENTRA_ALLOWED_GROUP_ID` | No | Restricción opcional por grupo (object id). Vacío = todos los usuarios del tenant. Si tiene valor, debe ser un GUID o la app no arranca |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | Telemetría (secreto de Container Apps) |
+
+Configuración de `appsettings.json`, que se puede sobrescribir con variables de entorno (por ejemplo, `RateLimiting__ChatPermitsPerMinute=30`):
+
+| Clave | Por defecto | Descripción |
+|---|---|---|
+| `Limits:MaxRequestBodyMegabytes` | 30 | Tamaño máximo del cuerpo (los adjuntos en base64) |
+| `RateLimiting:ChatPermitsPerMinute` | 20 | Mensajes por minuto por usuario |
+| `RateLimiting:ApiPermitsPerMinute` | 120 | Resto de la API |
+| `Uploads:RetentionHours` | 168 | Retención de imágenes subidas a Foundry |
+| `Uploads:CleanupEnabled` | true (false en Development) | Limpieza automática |
+| `Foundry:AgentCacheMinutes` | 10 | Caché de la definición del agente |
+| `Telemetry:UseEntraAuthentication` | false | Ingesta de App Insights con Entra ID |
+| `Security:ContentSecurityPolicy` | (ver código) | Sobrescribe la CSP |
+
+Si la configuración es inválida (placeholders, GUIDs incorrectos, endpoint sin https), **la aplicación no arranca** y el error indica qué falta.
+
+> Nunca ponga secretos en `appsettings*.json` ni en `.env`. Este backend no necesita ninguno: usa managed identity, o su login de Azure CLI en Development.
+
+## Ejecutar y probar
 
 ```powershell
-cd backend/WebApp.Api
-dotnet run
+cd backend
+dotnet run --project WebApp.Api          # http://localhost:8080 (Development: usa az login)
+dotnet test                              # o, si una política bloquea el .exe:
+dotnet build; dotnet WebApp.Api.Tests/bin/Debug/net10.0/WebApp.Api.Tests.dll
+dotnet list package --vulnerable --include-transitive
 ```
 
-**Or** use the unified script:
-```powershell
-.\deployment\scripts\start-local-dev.ps1
-```
+Qué cubren las pruebas:
 
-Backend runs at http://localhost:8080 (API + static files).
+- Validadores de petición y de adjuntos.
+- Reglas de dueño de las conversaciones.
+- Options y `DotEnvLoader`.
+- Contrato SSE.
+- Integración (sin Azure, con fakes de los puertos):
+  - 401 y 403.
+  - Aislamiento entre usuarios: continuar, aprobar, leer y listar.
+  - Errores genéricos.
+  - Endpoints eliminados (404).
+  - Cabeceras de seguridad, CORS y rate limiting.
 
-### Configuration
+## Manejo de errores y logging
 
-`.env` file (auto-generated by `azd up`):
-```ini
-AzureAd__ClientId=...
-AzureAd__TenantId=...
-AI_AGENT_ENDPOINT=...
-AI_AGENT_ID=...
-```
-
-Environment variables are loaded before ASP.NET Core configuration builder runs.
-
-## API Endpoints
-
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/api/chat/stream` | POST | Required | Send message, receive SSE streaming response |
-| `/api/agent` | GET | Required | Get agent metadata (name, model, starter prompts) |
-| `/api/agent/info` | GET | Required | Debug agent info |
-| `/api/conversations` | GET | Required | List past conversations |
-| `/api/conversations/{id}/messages` | GET | Required | Get conversation message history |
-| `/api/conversations/{id}` | DELETE | Required | Delete a conversation (returns 501 — SDK not yet supported) |
-| `/api/health` | GET | None | Health check for container probes |
-
-All endpoints except /api/health require `Chat.ReadWrite` scope in JWT token.
-
-## Development Tips
-
-- **Hot reload**: Enabled by default with `dotnet watch`
-- **CORS**: Enabled for `http://localhost:5173` in dev mode only
-- **Logging**: Structured logging to console (JSON in production)
-- **Debugging**: Attach debugger via VS Code or Visual Studio
-
-## Building
-
-```powershell
-dotnet build -c Release
-dotnet publish -c Release -o ./publish
-```
-
-Production builds are created in Docker multi-stage builds (see `deployment/docker/frontend.Dockerfile`).
-
-## Testing
-
-```powershell
-dotnet test
-
-# Check for vulnerabilities
-dotnet list package --vulnerable
-```
-
-## Key Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| Azure.AI.Projects | AI Foundry v2 Agents API SDK |
-| Azure.AI.Extensions.OpenAI | Project-scoped OpenAI clients (conversations, responses, files) |
-| Azure.Identity | ManagedIdentityCredential + OnBehalfOfCredential |
-| Microsoft.Identity.Web | JWT Bearer authentication |
-| Microsoft.Identity.Web.Certificateless | Secretless OBO via ManagedIdentityClientAssertion |
-
-See `WebApp.Api.csproj` for current versions. Uses v2 Agents API via `AgentAdministrationClient` for metadata and `ProjectResponsesClient` for streaming (required for MCP approvals and annotations). `AI_AGENT_VERSION` pins a specific version; when unset the newest version is resolved.
-
-## Security
-
-- ✅ JWT validation with dual audience support
-- ✅ HTTPS-only in production (Container Apps)
-- ✅ No secrets in code or `appsettings.json`
-- ✅ User-assigned managed identity with regional isolation (no secrets)
-- ✅ Scope-based authorization (`Chat.ReadWrite`)
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| 401 Unauthorized | Verify token has `Chat.ReadWrite` scope |
-| AI Foundry connection fails | Check `AI_AGENT_ENDPOINT` in `.env` |
-| Local auth fails | Run `az login` or `azd auth login` |
-| Port 8080 in use | Change in `launchSettings.json` |
-
-For AI-assisted development, see `.github/skills/writing-csharp-code/SKILL.md` and `.github/skills/implementing-chat-streaming/SKILL.md`.
+- Todas las excepciones no controladas se convierten en ProblemDetails (`ApiExceptionHandler`). En producción el mensaje es genérico y en español; el detalle solo va a Application Insights.
+- Durante el streaming, los errores se envían como un evento `error`, porque el código 200 ya se envió.
+- No se registran prompts, respuestas, tokens ni nombres de archivo. Los intentos de acceso a conversaciones ajenas se registran como `Warning`.
