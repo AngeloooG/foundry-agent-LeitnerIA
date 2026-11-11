@@ -63,8 +63,11 @@ try {
             $issues += "frontend/.env.local is missing (needed for Entra SPA auth)"
         } else {
             $content = Get-Content $frontendEnv -Raw
-            if ($content -notmatch 'VITE_ENTRA_SPA_CLIENT_ID=\S') {
-                $issues += "VITE_ENTRA_SPA_CLIENT_ID is empty in frontend/.env.local"
+            if ($content -notmatch 'VITE_ENTRA_FRONTEND_CLIENT_ID=\S') {
+                $issues += "VITE_ENTRA_FRONTEND_CLIENT_ID is empty in frontend/.env.local"
+            }
+            if ($content -notmatch 'VITE_ENTRA_BACKEND_CLIENT_ID=\S') {
+                $issues += "VITE_ENTRA_BACKEND_CLIENT_ID is empty in frontend/.env.local"
             }
             if ($content -notmatch 'VITE_ENTRA_TENANT_ID=\S') {
                 $issues += "VITE_ENTRA_TENANT_ID is empty in frontend/.env.local"

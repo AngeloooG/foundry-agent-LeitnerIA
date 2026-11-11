@@ -35,7 +35,7 @@ if ($webIdentityPrincipalId -and $aiFoundryResourceGroup -and $aiFoundryResource
 
 # Delete Entra app (Graph resources are NOT tied to Azure resource groups — azd down won't clean them up)
 if ($envName) {
-    $clientId = (azd env get-value ENTRA_SPA_CLIENT_ID 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+    $clientId = (azd env get-value ENTRA_FRONTEND_CLIENT_ID 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
     $deleted = $false
     if (-not [string]::IsNullOrWhiteSpace($clientId)) {
         az ad app delete --id $clientId 2>&1 | Out-Null

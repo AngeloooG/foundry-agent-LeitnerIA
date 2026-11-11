@@ -8,8 +8,9 @@ Start-HookLog -HookName "postprovision" -EnvironmentName $env:AZURE_ENV_NAME
 
 Write-Host "Post-Provision: Configure Entra App, RBAC & Local Config" -ForegroundColor Cyan
 
-# Get required env vars (ENTRA_SPA_CLIENT_ID is now a Bicep output)
-$clientId = azd env get-value ENTRA_SPA_CLIENT_ID 2>$null
+# Two app registrations (Bicep outputs): frontend SPA (sign-in) and backend API (audience, Chat.ReadWrite).
+$clientId = azd env get-value ENTRA_FRONTEND_CLIENT_ID 2>$null
+$backendClientId = azd env get-value ENTRA_BACKEND_CLIENT_ID 2>$null
 $containerAppUrl = azd env get-value WEB_ENDPOINT 2>$null
 $webIdentityPrincipalId = azd env get-value WEB_IDENTITY_PRINCIPAL_ID 2>$null
 $aiFoundryResourceGroup = azd env get-value AI_FOUNDRY_RESOURCE_GROUP 2>$null
@@ -17,8 +18,12 @@ $aiFoundryResourceName = azd env get-value AI_FOUNDRY_RESOURCE_NAME 2>$null
 $subscriptionId = azd env get-value AZURE_SUBSCRIPTION_ID 2>$null
 $tenantId = azd env get-value ENTRA_TENANT_ID 2>$null
 
-if (-not $clientId) {
-    Write-Host "[ERROR] ENTRA_SPA_CLIENT_ID not set (should be output from Bicep)" -ForegroundColor Red
+if (-not $clientId -or -not $backendClientId) {
+    Write-Host "[ERROR] ENTRA_FRONTEND_CLIENT_ID / ENTRA_BACKEND_CLIENT_ID not set (Bicep outputs)" -ForegroundColor Red
+    exit 1
+}
+if ($clientId -eq $backendClientId) {
+    Write-Host "[ERROR] Frontend and backend registrations must be different apps" -ForegroundColor Red
     exit 1
 }
 if (-not $containerAppUrl) {
@@ -26,14 +31,14 @@ if (-not $containerAppUrl) {
     exit 1
 }
 
-Write-Host "[OK] Client ID: $clientId (from Bicep)" -ForegroundColor Green
+Write-Host "[OK] Frontend (SPA) client ID: $clientId" -ForegroundColor Green
+Write-Host "[OK] Backend (API) client ID:  $backendClientId" -ForegroundColor Green
 Write-Host "[OK] Container App: $containerAppUrl" -ForegroundColor Green
 
-# Set identifierUri and update redirect URIs on Entra app
-# identifierUri can't be set in Bicep because it references the auto-generated appId
+# Frontend SPA: redirect URIs only. Its identifierUris are left untouched (the legacy api://<frontend> URI of the
+# single-registration model stays during the rollback window; see infra/entra-app.bicep).
 $app = az ad app show --id $clientId | ConvertFrom-Json
 $objectId = $app.id
-$identifierUri = "api://$clientId"
 
 # Localhost redirect URIs only for environments used for local development.
 # Production registrations must not accept http://localhost (a local process could capture the auth code).
@@ -55,7 +60,6 @@ if ($allowLocalhost) {
 }
 
 $patchBody = @{
-    identifierUris = @($identifierUri)
     spa = @{
         redirectUris = $redirectUris
     }
@@ -76,25 +80,26 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "[OK] Identifier URI: $identifierUri" -ForegroundColor Green
-Write-Host "[OK] Redirect URIs updated" -ForegroundColor Green
+Write-Host "[OK] SPA redirect URIs updated" -ForegroundColor Green
 
-# OBO: Bicep creates backend app registration + service principal + requiredResourceAccess.
-# FIC + identifierUri + admin consent are handled here (not Bicep) because Graph API
-# eventual consistency causes child resources to fail when the parent app hasn't replicated yet.
-$backendClientId = azd env get-value ENTRA_BACKEND_CLIENT_ID 2>$null
-if ($backendClientId) {
-    Write-Host "OBO: Configuring backend app ($backendClientId)..." -ForegroundColor Yellow
-    
+# Backend API: identifierUri api://<backend client id> (cannot be set in Bicep: it references the app's own appId).
+# The SPA requests api://<backend client id>/Chat.ReadWrite.
+az ad app update --id $backendClientId --identifier-uris "api://$backendClientId" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to set identifierUri on the backend app" -ForegroundColor Red
+    exit 1
+}
+Write-Host "[OK] Backend identifier URI: api://$backendClientId" -ForegroundColor Green
+
+# OBO (ENABLE_OBO=true only): federated identity credential MI -> backend app (secretless). Created here, not in
+# Bicep, because Graph eventual consistency makes child resources fail right after the parent app is created.
+# Admin consents are declared in Bicep (entra-app.bicep). With ENABLE_OBO=false the managed identity calls Foundry.
+$enableOboRaw = (azd env get-value ENABLE_OBO 2>$null) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+$enableObo = $enableOboRaw -and $enableOboRaw.Trim().ToLowerInvariant() -eq "true"
+if ($enableObo) {
+    Write-Host "OBO: configuring federated credential on backend app ($backendClientId)..." -ForegroundColor Yellow
     $backendObjectId = az ad app show --id $backendClientId --query "id" -o tsv 2>$null
-    
-    # Set identifierUri on backend app (required for scope resolution)
-    az ad app update --id $backendClientId --identifier-uris "api://$backendClientId" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Failed to set identifierUri on backend app — OBO will not work" -ForegroundColor Red
-        exit 1
-    }
-    
+
     # Create Federated Identity Credential (MI → backend app, secretless OBO)
     $existingFic = az ad app federated-credential list --id $backendObjectId --query "[?name=='container-app-mi-fic']" 2>$null | ConvertFrom-Json
     if ($existingFic -and $existingFic.Count -gt 0) {
@@ -122,32 +127,9 @@ if ($backendClientId) {
         }
     }
     
-    # Grant admin consent (best-effort — may require Entra admin)
-    $backendSpId = az ad sp show --id $backendClientId --query "id" -o tsv 2>$null
-    $spaSpId = az ad sp show --id $clientId --query "id" -o tsv 2>$null
-    if ($backendSpId -and $spaSpId) {
-        $existingConsent = az rest --method GET --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?`$filter=clientId eq '$spaSpId' and resourceId eq '$backendSpId'" --query "value[0].id" -o tsv 2>$null
-        if (-not $existingConsent) {
-            $consentBody = @{ clientId = $spaSpId; consentType = "AllPrincipals"; resourceId = $backendSpId; scope = "Chat.ReadWrite" } | ConvertTo-Json
-            $consentFile = [System.IO.Path]::GetTempFileName()
-            try {
-                $consentBody | Out-File -FilePath $consentFile -Encoding utf8
-                az rest --method POST --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants" --body "@$consentFile" --headers "Content-Type=application/json" 2>$null | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "[OK] Admin consent granted" -ForegroundColor Green
-                } else {
-                    Write-Host "[WARN] Admin consent failed — an Entra admin must grant consent" -ForegroundColor Yellow
-                    Write-Host "  az ad app permission admin-consent --id $backendClientId"
-                }
-            } finally {
-                Remove-Item $consentFile -ErrorAction SilentlyContinue
-            }
-        } else {
-            Write-Host "[OK] Admin consent already exists" -ForegroundColor Green
-        }
-    }
-    
     Write-Host "[OK] OBO configuration complete" -ForegroundColor Green
+} else {
+    Write-Host "[INFO] OBO disabled: the backend calls Foundry with its managed identity" -ForegroundColor Gray
 }
 
 # Assign the least-privilege Foundry role to the web managed identity, scoped to the PROJECT (not the account).
@@ -216,19 +198,18 @@ $aiAgentVersion = azd env get-value AI_AGENT_VERSION 2>$null
 
 # Frontend .env.local
 $frontendEnv = @"
-# Auto-generated - Do not commit
-VITE_ENTRA_SPA_CLIENT_ID=$clientId
+# Auto-generated - Do not commit (public identifiers only)
+VITE_ENTRA_FRONTEND_CLIENT_ID=$clientId
+VITE_ENTRA_BACKEND_CLIENT_ID=$backendClientId
 VITE_ENTRA_TENANT_ID=$tenantId
 "@
-if ($backendClientId) {
-    $frontendEnv += "`nVITE_ENTRA_BACKEND_CLIENT_ID=$backendClientId"
-}
 $frontendEnv | Out-File -FilePath "frontend/.env.local" -Encoding utf8 -Force
 
 # Backend .env (identifiers only - no secrets; in Development the API uses your Azure CLI login)
 $backendEnvContent = @"
 # Auto-generated - Do not commit
-ENTRA_SPA_CLIENT_ID=$clientId
+ENTRA_FRONTEND_CLIENT_ID=$clientId
+ENTRA_BACKEND_CLIENT_ID=$backendClientId
 ENTRA_TENANT_ID=$tenantId
 AI_AGENT_ENDPOINT=$aiAgentEndpoint
 AI_AGENT_ID=$aiAgentId

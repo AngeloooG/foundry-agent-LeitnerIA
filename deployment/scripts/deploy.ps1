@@ -9,7 +9,7 @@
     This repo uses azd's infra-only pattern (azure.yaml has no `services:`), so the build is done by the
     predeploy hook (deployment/hooks/predeploy.ps1):
     1. Builds deployment/docker/web.Dockerfile (local Docker, or ACR remote build as fallback)
-    2. Passes the public build args (ENTRA_SPA_CLIENT_ID, ENTRA_TENANT_ID, ...) from the azd environment
+    2. Passes the public build args (ENTRA_FRONTEND_CLIENT_ID, ENTRA_BACKEND_CLIENT_ID, ENTRA_TENANT_ID) from the azd environment
     3. Pushes to Azure Container Registry with Entra ID (no admin credentials)
     4. Updates the Container App image
 

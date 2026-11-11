@@ -8,9 +8,11 @@
 FROM node:22-alpine AS frontend-builder
 
 # Public identifiers baked into the bundle at build time (not secrets)
-ARG ENTRA_SPA_CLIENT_ID
+# Frontend = SPA registration (MSAL); backend = API registration (scope api://<backend>/Chat.ReadWrite). Both required:
+# the Vite build fails without them and writes leitneria-build.json, which the API verifies at startup.
+ARG ENTRA_FRONTEND_CLIENT_ID
+ARG ENTRA_BACKEND_CLIENT_ID
 ARG ENTRA_TENANT_ID
-ARG ENTRA_BACKEND_CLIENT_ID=""
 ARG APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING=""
 
 WORKDIR /app/frontend
@@ -24,9 +26,9 @@ COPY frontend/ ./
 RUN rm -f .env .env.local .env.development .env.production
 
 ENV NODE_ENV=production
-ENV VITE_ENTRA_SPA_CLIENT_ID=$ENTRA_SPA_CLIENT_ID
-ENV VITE_ENTRA_TENANT_ID=$ENTRA_TENANT_ID
+ENV VITE_ENTRA_FRONTEND_CLIENT_ID=$ENTRA_FRONTEND_CLIENT_ID
 ENV VITE_ENTRA_BACKEND_CLIENT_ID=$ENTRA_BACKEND_CLIENT_ID
+ENV VITE_ENTRA_TENANT_ID=$ENTRA_TENANT_ID
 ENV VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=$APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING
 # VITE_API_URL is not set: the SPA calls "/api" on the same origin
 

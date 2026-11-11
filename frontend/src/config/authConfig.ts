@@ -1,18 +1,31 @@
 import type { Configuration } from "@azure/msal-browser";
 import { LogLevel } from "@azure/msal-browser";
 
-// Environment variables (must be set during build or deployment)
-const clientId = import.meta.env.VITE_ENTRA_SPA_CLIENT_ID;
+// Build-time configuration (public identifiers). Two app registrations:
+//  - VITE_ENTRA_FRONTEND_CLIENT_ID: this SPA (MSAL client id, interactive sign-in).
+//  - VITE_ENTRA_BACKEND_CLIENT_ID: the API registration; its Chat.ReadWrite scope is the only one requested.
+// There is deliberately NO fallback from the backend id to the frontend id: the API rejects SPA-audience tokens.
+const clientId = import.meta.env.VITE_ENTRA_FRONTEND_CLIENT_ID;
 
 if (!clientId) {
   throw new Error(
-    "VITE_ENTRA_SPA_CLIENT_ID is not set. This must be provided during build time. " +
-    "For local dev, ensure azd environment is configured and run preprovision hook."
+    "VITE_ENTRA_FRONTEND_CLIENT_ID is not set. It must be provided at build time " +
+    "(azd hooks run postprovision writes it to frontend/.env.local for local development)."
   );
 }
 
-// When OBO is enabled, scopes target the backend API app instead of the SPA
-const scopeClientId = import.meta.env.VITE_ENTRA_BACKEND_CLIENT_ID || clientId;
+const backendClientId = import.meta.env.VITE_ENTRA_BACKEND_CLIENT_ID;
+
+if (!backendClientId) {
+  throw new Error("VITE_ENTRA_BACKEND_CLIENT_ID is not set. It must be provided at build time.");
+}
+
+if (backendClientId.toLowerCase() === clientId.toLowerCase()) {
+  throw new Error("VITE_ENTRA_BACKEND_CLIENT_ID must differ from VITE_ENTRA_FRONTEND_CLIENT_ID.");
+}
+
+/** Delegated scope exposed by the backend registration: api://<BACKEND_CLIENT_ID>/Chat.ReadWrite */
+export const apiScope = `api://${backendClientId}/Chat.ReadWrite`;
 
 const tenantId = import.meta.env.VITE_ENTRA_TENANT_ID;
 
@@ -61,12 +74,12 @@ export const msalConfig: Configuration = {
   },
 };
 
-// API permission scope (will match app registration in Step 08)
+// Sign-in and silent/redirect token acquisition request exactly the backend scope.
 export const loginRequest = {
-  scopes: [`api://${scopeClientId}/Chat.ReadWrite`],
+  scopes: [apiScope],
 };
 
 export const tokenRequest = {
-  scopes: [`api://${scopeClientId}/Chat.ReadWrite`],
+  scopes: [apiScope],
   forceRefresh: false, // Use cached token if valid
 };

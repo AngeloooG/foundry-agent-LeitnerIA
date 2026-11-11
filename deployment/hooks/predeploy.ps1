@@ -15,7 +15,7 @@ function Get-AzdValue($name) {
     return $val
 }
 
-$clientId = Get-AzdValue 'ENTRA_SPA_CLIENT_ID'
+$clientId = Get-AzdValue 'ENTRA_FRONTEND_CLIENT_ID'
 $tenantId = Get-AzdValue 'ENTRA_TENANT_ID'
 $backendClientId = Get-AzdValue 'ENTRA_BACKEND_CLIENT_ID'
 $appInsightsConnStr = Get-AzdValue 'APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING'
@@ -25,8 +25,12 @@ $acrName = Get-AzdValue 'AZURE_CONTAINER_REGISTRY_NAME'
 $resourceGroup = Get-AzdValue 'AZURE_RESOURCE_GROUP_NAME'
 $containerApp = Get-AzdValue 'AZURE_CONTAINER_APP_NAME'
 
-if (-not $clientId -or -not $tenantId) {
-    Write-Host "[ERROR] ENTRA_SPA_CLIENT_ID or ENTRA_TENANT_ID not set" -ForegroundColor Red
+if (-not $clientId -or -not $backendClientId -or -not $tenantId) {
+    Write-Host "[ERROR] ENTRA_FRONTEND_CLIENT_ID, ENTRA_BACKEND_CLIENT_ID and ENTRA_TENANT_ID are required (run azd provision)" -ForegroundColor Red
+    exit 1
+}
+if ($clientId -eq $backendClientId) {
+    Write-Host "[ERROR] ENTRA_BACKEND_CLIENT_ID must differ from ENTRA_FRONTEND_CLIENT_ID" -ForegroundColor Red
     exit 1
 }
 if (-not $acrName) {
@@ -55,10 +59,10 @@ try {
         Write-Host "Building with local Docker..." -ForegroundColor Cyan
         $buildArgs = @(
             "--platform", "linux/amd64",
-            "--build-arg", "ENTRA_SPA_CLIENT_ID=$clientId",
+            "--build-arg", "ENTRA_FRONTEND_CLIENT_ID=$clientId",
+            "--build-arg", "ENTRA_BACKEND_CLIENT_ID=$backendClientId",
             "--build-arg", "ENTRA_TENANT_ID=$tenantId"
         )
-        if ($backendClientId) { $buildArgs += @("--build-arg", "ENTRA_BACKEND_CLIENT_ID=$backendClientId") }
         if ($appInsightsConnStr) { $buildArgs += @("--build-arg", "APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING=$appInsightsConnStr") }
         $buildArgs += @("-f", "deployment/docker/web.Dockerfile", "-t", $imageName, ".")
         docker build @buildArgs 2>&1 | Out-Host
@@ -70,8 +74,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Docker push failed" }
     } else {
         Write-Host "Using ACR cloud build (3-5 min)..." -ForegroundColor Yellow
-        $acrBuildArgs = @("--build-arg", "ENTRA_SPA_CLIENT_ID=$clientId", "--build-arg", "ENTRA_TENANT_ID=$tenantId")
-        if ($backendClientId) { $acrBuildArgs += @("--build-arg", "ENTRA_BACKEND_CLIENT_ID=$backendClientId") }
+        $acrBuildArgs = @("--build-arg", "ENTRA_FRONTEND_CLIENT_ID=$clientId", "--build-arg", "ENTRA_BACKEND_CLIENT_ID=$backendClientId", "--build-arg", "ENTRA_TENANT_ID=$tenantId")
         if ($appInsightsConnStrEscaped) { $acrBuildArgs += @("--build-arg", "APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING=$appInsightsConnStrEscaped") }
         $buildOutput = az acr build --registry $acrName --image "web:$imageTag" `
             @acrBuildArgs `
@@ -90,6 +93,14 @@ try {
     if ($containerApp -and $resourceGroup) {
         $exists = az containerapp show --name $containerApp --resource-group $resourceGroup --query name -o tsv 2>$null
         if ($exists) {
+            # The image bakes ENTRA_BACKEND_CLIENT_ID into the SPA. Refuse to roll it out to a Container App configured
+            # for another backend registration (run azd provision first). The API repeats this check at startup.
+            $appBackendClientId = az containerapp show --name $containerApp --resource-group $resourceGroup `
+                --query "properties.template.containers[0].env[?name=='ENTRA_BACKEND_CLIENT_ID'].value | [0]" -o tsv 2>$null
+            if ($appBackendClientId -ne $backendClientId) {
+                Write-Host "[ERROR] The Container App expects ENTRA_BACKEND_CLIENT_ID '$appBackendClientId' but the image was built for '$backendClientId'. Run 'azd provision' before deploying." -ForegroundColor Red
+                throw "Backend client id mismatch"
+            }
             Write-Host "Updating Container App..." -ForegroundColor Cyan
             az containerapp update --name $containerApp --resource-group $resourceGroup `
                 --image $imageName --output none
