@@ -60,7 +60,8 @@ app.MapGroup("/api")
     .MapConversationEndpoints();
 
 // Unknown API routes are a real 404 (not the SPA's index.html); deep links such as /agente return the SPA.
-app.MapFallback("/api/{**path}", ApiResults.NotFound).AllowAnonymous();
+// Not anonymous: the FallbackPolicy applies, so unauthenticated callers get 401 and cannot probe API routes.
+app.MapFallback("/api/{**path}", ApiResults.NotFound);
 app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();

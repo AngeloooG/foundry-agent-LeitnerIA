@@ -74,7 +74,7 @@ Leitner IA es una aplicación interna. Puede usarla **cualquier usuario autentic
 | Restricción por grupo | **Opcional** con `ENTRA_ALLOWED_GROUP_ID`. Vacía o ausente: no se evalúa ningún grupo. Con un GUID: restricción adicional. Con un valor que no sea GUID: la API no arranca (`ValidateOnStart`) y `preprovision` falla |
 | App roles | No se crean mientras no existan capacidades funcionales distintas |
 | Azure RBAC | Solo para identidades técnicas sobre recursos de Azure (managed identity → Foundry, ACR, App Insights). Nunca para usuarios finales |
-| Redirect URIs de localhost | Solo con `ENTRA_ALLOW_LOCALHOST_REDIRECTS=true` (opción explícita de desarrollo) |
+| Redirect URIs de localhost | Solo con `ENTRA_ALLOW_LOCALHOST_REDIRECTS=true` (opción explícita de desarrollo). Solo admite `true`, `false` o vacío; otro valor hace fallar `postprovision` |
 
 ### Dónde se aplica
 
@@ -82,7 +82,7 @@ Todo está en `backend/WebApp.Api/Security/`. Ningún endpoint repite estas comp
 
 | Pieza | Responsabilidad |
 |---|---|
-| `EntraOptions` + `EntraOptionsValidator` | `TenantId` y `ClientId` obligatorios (GUID); `BackendClientId` y `AllowedGroupId` opcionales (GUID si tienen valor). Validación al arrancar |
+| `EntraOptions` + `EntraOptionsValidator` | `TenantId` y `ClientId` (SPA) obligatorios (GUID); `BackendClientId` opcional (GUID distinto de `ClientId`; si existe, es la única audiencia); `AllowedGroupId` vacío o GUID canónico. Validación al arrancar |
 | `EntraTokenValidation` | Issuer igual al v1 o v2 **del tenant configurado** y `tid` coincidente; audiencias `{clientId}` y `api://{clientId}`; firma y expiración obligatorias; tolerancia de reloj de 2 minutos. Se aplica con `PostConfigure`, después de Microsoft.Identity.Web |
 | `CorporateAccessAuthorization` | `TenantMemberRequirement` (defensa en profundidad sobre `tid`) y `AllowedGroupRequirement` (se cumple siempre si no hay grupo; si lo hay, exige el claim `groups`) |
 | `SecurityServiceCollectionExtensions` | Una sola política: autenticado + scope `Chat.ReadWrite` + ambos requisitos, aplicada al grupo `/api` y como política de respaldo |
@@ -97,16 +97,91 @@ La ausencia de grupo **nunca** desactiva la validación del token: issuer, tenan
 
 ### Usuarios invitados (B2B)
 
-"Todos los usuarios del tenant" **incluye las cuentas Guest del directorio**. Un invitado B2B inicia sesión en el tenant de CONSEIN y recibe un token emitido por ese tenant (`tid` de CONSEIN), por lo que cumple todas las validaciones. Single-tenant no excluye invitados por sí mismo.
+"Todos los usuarios del tenant" **incluye las cuentas Guest del directorio**. Un invitado B2B inicia sesión en el tenant de CONSEIN y recibe un token emitido por ese tenant (`tid` de CONSEIN), por lo que cumple todas las validaciones. Single-tenant no excluye invitados por sí mismo. Con `ENTRA_ALLOWED_GROUP_ID` configurado, un invitado solo accede si alguien lo añade al grupo.
 
-Si la organización decide excluirlos, la alternativa de menor complejidad (no implementada) es:
+**Exclusión de invitados (no implementada).** El claim opcional `acct` distingue el tipo de cuenta:
 
-1. Añadir el claim opcional `acct` al access token de la app de Entra (`optionalClaims.accessToken`: `acct`). Vale `0` para miembros y `1` para invitados.
-2. Añadir un `MemberAccountRequirement` a la misma política de `SecurityServiceCollectionExtensions` que deniegue `acct = 1`.
+| `acct` | Cuenta |
+|---|---|
+| `0` | Miembro del tenant |
+| `1` | Invitado (Guest) |
 
-Es un cambio de configuración más un requisito de unas 15 líneas con su prueba, sin licencias adicionales. Si CONSEIN tiene Microsoft Entra ID P1, también puede hacerse sin código con una directiva de **Acceso condicional** que bloquee a "Guest or external users" para esta aplicación.
+Cambios necesarios si CONSEIN decide excluirlos:
 
-Con `ENTRA_ALLOWED_GROUP_ID` configurado, los invitados solo acceden si alguien los añade al grupo.
+1. **Bicep** (`infra/entra-app.bicep`): añadir el claim opcional al **access token** de la app que es audiencia de la API. Es el recurso `app` en la arquitectura de un solo registro, junto a `groupMembershipClaims` (línea ~40), y `backendApp` si OBO está activo (línea ~84):
+
+   ```bicep
+   optionalClaims: {
+     accessToken: [
+       { name: 'acct', essential: false }
+     ]
+   }
+   ```
+
+2. **Backend**: la comprobación va en `TenantMemberHandler.HandleRequirementAsync` (`backend/WebApp.Api/Security/CorporateAccessAuthorization.cs`, línea ~19). Solo debe llamar a `context.Succeed` si además `acct` es `0`, y denegar si falta (fail closed). No hace falta tocar la política: `TenantMemberRequirement` ya está registrada en `SecurityServiceCollectionExtensions.cs` (`.AddRequirements(...)`, línea ~71).
+3. **Pruebas**: un miembro (`acct=0`) devuelve 200; un invitado (`acct=1`) y un token sin `acct`, 403.
+
+Con Microsoft Entra ID P1 también puede hacerse sin código, con una directiva de **Acceso condicional** que bloquee "Guest or external users" para esta aplicación.
+
+### Auditoría del modelo (2026-11-11)
+
+**Registros de aplicación.** El entorno desplegado usa **un solo registro** para el SPA y la API:
+
+| Dato | Valor |
+|---|---|
+| Registro | `ai-foundry-agent-env-LeitnerIA` |
+| Client ID | `491ceed0-443d-4414-b16f-91ecdcafafeb` |
+| Application ID URI | `api://491ceed0-443d-4414-b16f-91ecdcafafeb` |
+| Scope expuesto | `Chat.ReadWrite` |
+| Cuentas | `AzureADMyOrg` |
+| Versión del access token | No fijada (`requestedAccessTokenVersion` null), por lo que es v1: `aud` = Application ID URI, `iss` = `https://sts.windows.net/{tid}/` |
+
+El Container App no tiene `ENTRA_BACKEND_CLIENT_ID`, así que OBO no está activo. Si se activa (`ENABLE_OBO=true`), Bicep crea un segundo registro (`ai-foundry-agent-backend-<entorno>`) que pasa a ser la **única** audiencia aceptada.
+
+**Audiencia aceptada** (`EntraOptions.ApiClientId`, que es `ENTRA_BACKEND_CLIENT_ID` si existe y si no `ENTRA_SPA_CLIENT_ID`): `api://{ApiClientId}` y `{ApiClientId}`. Son las dos formas (v1 y v2) del mismo registro. Con dos registros, el Client ID del SPA se rechaza con 401. `ENTRA_BACKEND_CLIENT_ID` igual a `ENTRA_SPA_CLIENT_ID` es un error de configuración y la API no arranca.
+
+**Scope solicitado** (`frontend/src/config/authConfig.ts`, usado por `loginRequest` y `tokenRequest`, y este por `useAuth().getAccessToken`): `api://{VITE_ENTRA_BACKEND_CLIENT_ID || VITE_ENTRA_SPA_CLIENT_ID}/Chat.ReadWrite`. Hoy es `api://491ceed0-443d-4414-b16f-91ecdcafafeb/Chat.ReadWrite`.
+
+- La API lo exige con `RequireScope("Chat.ReadWrite")` (Microsoft.Identity.Web), que separa `scp` por espacios y compara token a token, distinguiendo mayúsculas. `Chat.ReadWrite.All`, `XChat.ReadWrite` y `chat.readwrite` se rechazan (pruebas en `EntraAuditTests`).
+- En modo OBO, la imagen del frontend debe construirse con `VITE_ENTRA_BACKEND_CLIENT_ID`. `predeploy.ps1` lo pasa como build arg cuando `ENTRA_BACKEND_CLIENT_ID` existe.
+
+**Políticas.**
+
+- `FallbackPolicy` y la política `RequireChatScope` del grupo `/api` son **la misma instancia**. Exige:
+  - usuario autenticado (token válido: issuer y `tid` del tenant, audiencia, firma y expiración);
+  - scope `Chat.ReadWrite`;
+  - `TenantMemberRequirement`;
+  - `AllowedGroupRequirement`.
+- No existe una política más débil. Una prueba recorre todos los endpoints registrados y falla si alguno de `/api` usa otra política o permite acceso anónimo sin estar en la lista.
+
+| Endpoint | Acceso |
+|---|---|
+| `POST /api/chat/stream` | `RequireChatScope` |
+| `GET /api/agent` | `RequireChatScope` |
+| `GET /api/conversations` | `RequireChatScope` |
+| `GET /api/conversations/{id}/messages` | `RequireChatScope` + propietario (`ConversationService`, 404 si no lo es) |
+| `/api/{**path}` (rutas desconocidas) | FallbackPolicy (401 sin token, 404 con token válido) |
+| `GET /api/health`, `GET /health`, `GET /alive` | Anónimos: sondas de Container Apps; solo devuelven el estado |
+| SPA (archivos estáticos y fallback `{*path:nonfile}`) | Anónimos: la página debe cargar para iniciar sesión; no contiene datos |
+
+No hay endpoints de archivos: se eliminaron en la fase 1.
+
+**Respuestas 401 y 403.**
+
+- Se producen en el middleware, **antes** de llegar a los endpoints: no se invoca `IAgentGateway` ni se crean conversaciones (verificado en las pruebas).
+- `Content-Type: application/problem+json; charset=utf-8`, con `title` y `detail` en español:
+  - 401: "Sesión no válida / Su sesión no es válida o ha expirado…"
+  - 403: "Acceso denegado / No tiene permiso para usar Leitner IA…"
+- No incluyen issuer, tenant, client ID, grupo ni claims. `WWW-Authenticate` es `Bearer` sin `error_description` (`IncludeErrorDetails = false`).
+- `agentStreamClient.ts` lee el `detail` (acepta cualquier content-type que contenga `json`) y lo muestra en el chat.
+
+**Grupos.**
+
+- Sin grupo configurado, no se exige el claim `groups` y un *overage* no bloquea.
+- Con grupo configurado:
+  - Se exige coincidencia exacta del GUID en formato canónico (`D`), sin distinguir mayúsculas.
+  - Claim ausente: 403. *Overage*: 403.
+  - El aviso de *overage* no imprime grupos, claims ni identificadores (verificado con un logger de prueba).
 
 ### Pendiente de permisos de Entra o Azure
 

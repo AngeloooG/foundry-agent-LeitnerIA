@@ -43,9 +43,10 @@ public static class SecurityServiceCollectionExtensions
 
         // Microsoft.Identity.Web reads the "AzureAd" section to build the single-tenant authority.
         var entra = EntraOptions.From(configuration);
-        configuration["AzureAd:ClientId"] = entra.ClientId;
+        // The API registration (backend app when OBO is enabled, otherwise the single SPA+API app).
+        configuration["AzureAd:ClientId"] = entra.ApiClientId;
         configuration["AzureAd:TenantId"] = entra.TenantId;
-        configuration["AzureAd:Audience"] = $"api://{entra.ClientId}";
+        configuration["AzureAd:Audience"] = $"api://{entra.ApiClientId}";
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApi(
@@ -56,7 +57,11 @@ public static class SecurityServiceCollectionExtensions
         // after Microsoft.Identity.Web's own configuration, so these rules are the ones in effect.
         builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .PostConfigure<IOptions<EntraOptions>>((jwt, entraOptions) =>
-                EntraTokenValidation.Apply(jwt.TokenValidationParameters, entraOptions.Value));
+            {
+                EntraTokenValidation.Apply(jwt.TokenValidationParameters, entraOptions.Value);
+                // Never tell the caller which check failed (issuer, audience, signature...) in WWW-Authenticate.
+                jwt.IncludeErrorDetails = false;
+            });
 
         // One policy for every API endpoint: authenticated user of the tenant, API scope and, only when
         // ENTRA_ALLOWED_GROUP_ID is set, membership of that group. Azure RBAC is never used for end users.

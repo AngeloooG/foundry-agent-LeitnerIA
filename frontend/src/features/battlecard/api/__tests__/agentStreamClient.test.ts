@@ -71,6 +71,19 @@ describe("streamAgentMessage", () => {
         await expect(streamAgentMessage({ message: "", token: "t" })).rejects.toThrow("El mensaje no puede estar vacío.");
     });
 
+    it.each([
+        [401, "Sesión no válida", "Su sesión no es válida o ha expirado. Vuelva a iniciar sesión."],
+        [403, "Acceso denegado", "No tiene permiso para usar Leitner IA. Si necesita acceso, contacte al administrador."],
+    ])("shows the backend's %i ProblemDetails detail to the user", async (status, title, detail) => {
+        // Same shape and content-type the API returns for authentication/authorization rejections.
+        mockFetch(new Response(JSON.stringify({ type: "https://tools.ietf.org/html/rfc9110", title, status, detail }), {
+            status,
+            headers: { "Content-Type": "application/problem+json; charset=utf-8" },
+        }));
+
+        await expect(streamAgentMessage({ message: "hola", token: "t" })).rejects.toThrow(detail);
+    });
+
     it("sends the bearer token and omits empty attachment arrays", async () => {
         const fetchMock = mockFetch(sseResponse(['data: {"type":"done"}\n\n']));
 

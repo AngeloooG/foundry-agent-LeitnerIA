@@ -158,3 +158,42 @@ public class EntraTokenValidationTests
             EntraTokenValidation.ValidIssuers(Tenant)[0], TokenWithTid(Guid.NewGuid().ToString()), Tenant));
     }
 }
+
+[TestClass]
+public class AllowedGroupLoggingTests
+{
+    private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add($"{logLevel}: {formatter(state, exception)} {string.Join(",", (state as IEnumerable<KeyValuePair<string, object?>>)?.Select(kv => $"{kv.Key}={kv.Value}") ?? [])}");
+    }
+
+    [TestMethod]
+    public async Task Overage_LogsAWarning_WithoutGroupsOrClaims()
+    {
+        const string tenant = "00000000-0000-0000-0000-000000000002";
+        const string allowed = "11111111-2222-3333-4444-555555555555";
+        const string memberOf = "66666666-7777-8888-9999-000000000000";
+        var logger = new CapturingLogger<AllowedGroupHandler>();
+        var handler = new AllowedGroupHandler(
+            Options.Create(new EntraOptions { TenantId = tenant, ClientId = tenant, AllowedGroupId = allowed }), logger);
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("tid", tenant), new Claim("oid", "user-oid"), new Claim("groups", memberOf),
+            new Claim("_claim_names", "{\"groups\":\"src1\"}"),
+        ], "test"));
+        var context = new AuthorizationHandlerContext([new AllowedGroupRequirement()], user, null);
+
+        await handler.HandleAsync(context);
+
+        Assert.IsFalse(context.HasSucceeded);
+        var log = logger.Messages.Single();
+        StringAssert.StartsWith(log, "Warning");
+        foreach (var sensitive in new[] { allowed, memberOf, tenant, "user-oid", "src1" })
+            Assert.IsFalse(log.Contains(sensitive, StringComparison.OrdinalIgnoreCase), $"Log leaks '{sensitive}': {log}");
+    }
+}

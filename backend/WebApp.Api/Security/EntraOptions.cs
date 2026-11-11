@@ -22,29 +22,29 @@ public sealed class EntraOptions
     /// <summary>The only tenant whose tokens are accepted (required GUID).</summary>
     public string TenantId { get; set; } = string.Empty;
 
-    /// <summary>App registration that exposes the API scope; defines the token audience (required GUID).</summary>
+    /// <summary>
+    /// SPA (frontend) app registration (required GUID). In the default single-registration architecture the same
+    /// registration also exposes the API scope, so it is the API audience as well.
+    /// </summary>
     public string ClientId { get; set; } = string.Empty;
 
-    /// <summary>Backend app registration when On-Behalf-Of is enabled (optional GUID; also accepted as audience).</summary>
+    /// <summary>
+    /// Separate backend API registration, used when On-Behalf-Of is enabled (optional GUID). When set it is the ONLY
+    /// accepted audience: tokens issued for the SPA registration are rejected.
+    /// </summary>
     public string? BackendClientId { get; set; }
+
+    /// <summary>The registration that exposes <c>Chat.ReadWrite</c> and is the token audience.</summary>
+    public string ApiClientId => string.IsNullOrWhiteSpace(BackendClientId) ? ClientId : BackendClientId;
 
     /// <summary>Optional security group (object id). When set, only users whose token carries it in the groups claim are authorized.</summary>
     public string? AllowedGroupId { get; set; }
 
-    /// <summary>Accepted <c>aud</c> values: v2 tokens use the client id, v1 tokens the application id URI.</summary>
-    public IReadOnlyList<string> Audiences
-    {
-        get
-        {
-            var audiences = new List<string> { ClientId, $"api://{ClientId}" };
-            if (!string.IsNullOrWhiteSpace(BackendClientId))
-            {
-                audiences.Add(BackendClientId);
-                audiences.Add($"api://{BackendClientId}");
-            }
-            return audiences;
-        }
-    }
+    /// <summary>
+    /// Accepted <c>aud</c> values, both forms of the single API registration: the application ID URI
+    /// (<c>api://{id}</c>, v1 access tokens, the current default) and the client id (v2 access tokens).
+    /// </summary>
+    public IReadOnlyList<string> Audiences => [ApiClientId, $"api://{ApiClientId}"];
 
     public bool HasGroupRestriction => !string.IsNullOrWhiteSpace(AllowedGroupId);
 
@@ -72,7 +72,10 @@ public sealed class EntraOptions
             yield return $"{ClientIdVariable} must be the GUID of the Entra app registration.";
         if (BackendClientId is not null && !Guid.TryParse(BackendClientId, out _))
             yield return $"{BackendClientIdVariable} must be a GUID when set.";
-        if (AllowedGroupId is not null && !Guid.TryParse(AllowedGroupId, out _))
+        if (BackendClientId is not null && string.Equals(BackendClientId, ClientId, StringComparison.OrdinalIgnoreCase))
+            yield return $"{BackendClientIdVariable} must differ from {ClientIdVariable}; leave it empty for a single app registration.";
+        // Canonical form only (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx), the format Entra ID emits in the groups claim.
+        if (AllowedGroupId is not null && !Guid.TryParseExact(AllowedGroupId, "D", out _))
             yield return $"{AllowedGroupIdVariable} must be a group object id (GUID) when set; leave it empty to allow every user of the tenant.";
     }
 

@@ -37,7 +37,15 @@ $identifierUri = "api://$clientId"
 
 # Localhost redirect URIs only for environments used for local development.
 # Production registrations must not accept http://localhost (a local process could capture the auth code).
-$allowLocalhost = (azd env get-value ENTRA_ALLOW_LOCALHOST_REDIRECTS 2>$null) -eq "true"
+# Explicit boolean: "true" or "false" (empty/unset = false). Anything else is a configuration error, so a typo
+# such as "yes" can never silently change the production redirect URIs.
+$allowLocalhostRaw = (azd env get-value ENTRA_ALLOW_LOCALHOST_REDIRECTS 2>$null) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+$allowLocalhostRaw = if ($allowLocalhostRaw) { $allowLocalhostRaw.Trim().ToLowerInvariant() } else { "" }
+if ($allowLocalhostRaw -notin @("", "true", "false")) {
+    Write-Host "[ERROR] ENTRA_ALLOW_LOCALHOST_REDIRECTS must be 'true' or 'false' (got '$allowLocalhostRaw')" -ForegroundColor Red
+    exit 1
+}
+$allowLocalhost = $allowLocalhostRaw -eq "true"
 $redirectUris = @($containerAppUrl)
 if ($allowLocalhost) {
     $redirectUris += @("http://localhost:8080", "http://localhost:5173")
