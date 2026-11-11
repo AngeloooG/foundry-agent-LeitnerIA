@@ -18,17 +18,19 @@ $subscriptionId = (azd env get-value AZURE_SUBSCRIPTION_ID 2>&1) | Where-Object 
 if ($webIdentityPrincipalId -and $aiFoundryResourceGroup -and $aiFoundryResourceName -and $subscriptionId) {
     Write-Host "Removing role assignment from AI Foundry resource..." -ForegroundColor Yellow
     
-    $scope = "/subscriptions/$subscriptionId/resourceGroups/$aiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$aiFoundryResourceName"
-    
-    $roles = @("Cognitive Services User", "Cognitive Services OpenAI Contributor", "Azure AI Developer")
-    foreach ($roleName in $roles) {
-        az role assignment delete `
-            --assignee $webIdentityPrincipalId `
-            --role $roleName `
-            --scope $scope 2>&1 | Out-Null
-        
-        Write-Host "[OK] $roleName — removed (if it existed)" -ForegroundColor Green
+    $accountScope = "/subscriptions/$subscriptionId/resourceGroups/$aiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$aiFoundryResourceName"
+    $aiAgentEndpoint = (azd env get-value AI_AGENT_ENDPOINT 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+    $scopes = @($accountScope)
+    if ($aiAgentEndpoint -match '/api/projects/([^/?]+)') { $scopes += "$accountScope/projects/$($Matches[1])" }
+
+    # Current role (Foundry User, by id) and legacy roles, at account and project scope
+    $roles = @("53ca6127-db72-4b80-b1b0-d745d6d5456d", "Cognitive Services User", "Cognitive Services OpenAI Contributor", "Azure AI Developer")
+    foreach ($scope in $scopes) {
+        foreach ($roleName in $roles) {
+            az role assignment delete --assignee $webIdentityPrincipalId --role $roleName --scope $scope 2>&1 | Out-Null
+        }
     }
+    Write-Host "[OK] Foundry role assignments removed (if they existed)" -ForegroundColor Green
 }
 
 # Delete Entra app (Graph resources are NOT tied to Azure resource groups — azd down won't clean them up)
@@ -48,6 +50,19 @@ if ($envName) {
             az ad app delete --id $app 2>&1 | Out-Null
             Write-Host "[OK] Entra app deleted (by name): $appName" -ForegroundColor Green
         }
+    }
+}
+
+# Delete the OBO backend app (if OBO was enabled). Deleting the app also removes its tenant-wide
+# (AllPrincipals) consent grants and its federated identity credential.
+if ($envName) {
+    $backendClientId = (azd env get-value ENTRA_BACKEND_CLIENT_ID 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($backendClientId)) {
+        $backendClientId = az ad app list --display-name "ai-foundry-agent-backend-$envName" --query "[0].appId" -o tsv 2>$null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($backendClientId)) {
+        az ad app delete --id $backendClientId 2>&1 | Out-Null
+        Write-Host "[OK] OBO backend app deleted: $backendClientId" -ForegroundColor Green
     }
 }
 

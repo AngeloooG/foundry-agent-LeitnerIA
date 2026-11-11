@@ -3,15 +3,21 @@ param location string
 param tags object
 param acrPullPrincipalId string = ''
 
+@description('Basic (~US$5/month) is enough for one image. Private endpoints and disabling public access require Premium (much higher cost).')
+@allowed(['Basic', 'Standard', 'Premium'])
+param skuName string = 'Basic'
+
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: name
   location: location
   tags: tags
   sku: {
-    name: 'Basic'
+    name: skuName
   }
   properties: {
+    // Admin user stays disabled: pulls use the managed identity (AcrPull), pushes use Entra ID (az acr login).
     adminUserEnabled: false
+    // Public endpoint required on Basic/Standard (azd/ACR Tasks push from outside a VNet). See infra/README.md.
     publicNetworkAccess: 'Enabled'
   }
 }

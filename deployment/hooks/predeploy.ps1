@@ -60,7 +60,7 @@ try {
         )
         if ($backendClientId) { $buildArgs += @("--build-arg", "ENTRA_BACKEND_CLIENT_ID=$backendClientId") }
         if ($appInsightsConnStr) { $buildArgs += @("--build-arg", "APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING=$appInsightsConnStr") }
-        $buildArgs += @("-f", "deployment/docker/frontend.Dockerfile", "-t", $imageName, ".")
+        $buildArgs += @("-f", "deployment/docker/web.Dockerfile", "-t", $imageName, ".")
         docker build @buildArgs 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "Docker build failed" }
         
@@ -75,7 +75,7 @@ try {
         if ($appInsightsConnStrEscaped) { $acrBuildArgs += @("--build-arg", "APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING=$appInsightsConnStrEscaped") }
         $buildOutput = az acr build --registry $acrName --image "web:$imageTag" `
             @acrBuildArgs `
-            --file deployment/docker/frontend.Dockerfile . `
+            --file deployment/docker/web.Dockerfile . `
             --no-logs --only-show-errors 2>&1
 
         if ($LASTEXITCODE -ne 0) {

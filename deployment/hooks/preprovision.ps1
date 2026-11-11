@@ -162,20 +162,21 @@ if ([string]::IsNullOrWhiteSpace($existingEndpoint)) {
             $isInteractive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
             
             if ($isInteractive) {
-                $choice = (Read-Host "Select (1-$($resources.Count)) or press Enter for [1]").Trim()
-                if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "1" }
-                $idx = [int]$choice - 1
-                if ($idx -ge 0 -and $idx -lt $resources.Count) {
-                    $selected = $resources[$idx]
-                } else {
-                    $selected = $resources[0]
+                $choice = (Read-Host "Select (1-$($resources.Count))").Trim()
+                $idx = 0
+                if (-not [int]::TryParse($choice, [ref]$idx) -or $idx -lt 1 -or $idx -gt $resources.Count) {
+                    Write-Host "[ERROR] Invalid selection '$choice'." -ForegroundColor Red
+                    exit 1
                 }
+                $selected = $resources[$idx - 1]
+                azd env set AI_FOUNDRY_RESOURCE_NAME $selected.name
                 Write-Host "[OK] Selected: $($selected.name)" -ForegroundColor Green
             } else {
-                # Non-interactive: auto-select first and warn
-                $selected = $resources[0]
-                Write-Host "[!] Non-interactive mode: using first resource '$($selected.name)'" -ForegroundColor Yellow
-                Write-Host "    To specify: azd env set AI_FOUNDRY_RESOURCE_NAME <name>" -ForegroundColor Yellow
+                # Non-interactive: never guess. RBAC is granted on the selected account, so picking the
+                # wrong one would give the app access to an unrelated Foundry resource.
+                Write-Host "[ERROR] Multiple AI Foundry resources and no AI_FOUNDRY_RESOURCE_NAME configured." -ForegroundColor Red
+                Write-Host "    Run: azd env set AI_FOUNDRY_RESOURCE_NAME <name>" -ForegroundColor Yellow
+                exit 1
             }
         }
     }
@@ -203,7 +204,22 @@ if ([string]::IsNullOrWhiteSpace($existingEndpoint)) {
         Write-Host "[ERROR] No projects found. Create one at https://ai.azure.com" -ForegroundColor Red
         exit 1
     }
-    $projectName = $projects[0].name.Split('/')[-1]
+    # Use AI_FOUNDRY_PROJECT_NAME when set; otherwise require a single project (never guess).
+    $configuredProject = (azd env get-value AI_FOUNDRY_PROJECT_NAME 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+    $projectNames = @($projects | ForEach-Object { $_.name.Split('/')[-1] })
+    if (-not [string]::IsNullOrWhiteSpace($configuredProject)) {
+        if ($projectNames -notcontains $configuredProject.Trim()) {
+            Write-Host "[ERROR] AI_FOUNDRY_PROJECT_NAME '$configuredProject' not found. Available: $($projectNames -join ', ')" -ForegroundColor Red
+            exit 1
+        }
+        $projectName = $configuredProject.Trim()
+    } elseif ($projectNames.Count -eq 1) {
+        $projectName = $projectNames[0]
+    } else {
+        Write-Host "[ERROR] Multiple projects found: $($projectNames -join ', ')" -ForegroundColor Red
+        Write-Host "    Run: azd env set AI_FOUNDRY_PROJECT_NAME <name>" -ForegroundColor Yellow
+        exit 1
+    }
     
     $aiEndpoint = "https://$($selected.name).services.ai.azure.com/api/projects/$projectName"
     azd env set AI_FOUNDRY_RESOURCE_GROUP $selected.resourceGroup

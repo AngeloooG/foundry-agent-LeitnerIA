@@ -96,7 +96,7 @@ dotnet build -c Release
 dotnet publish -c Release -o ./publish
 ```
 
-Production builds are created in Docker multi-stage builds (see `deployment/docker/frontend.Dockerfile`).
+Production builds are created in Docker multi-stage builds (see `deployment/docker/web.Dockerfile`).
 
 ## Testing
 

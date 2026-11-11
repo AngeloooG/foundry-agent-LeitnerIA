@@ -75,7 +75,7 @@ runSubagent(
 
 Build order: React → .NET → Runtime
 
-- Frontend: `deployment/docker/frontend.Dockerfile`
+- Frontend: `deployment/docker/web.Dockerfile`
 - Backend: `deployment/docker/backend.Dockerfile`
 - Custom npm registries: Add `.npmrc` to `frontend/` directory
 
@@ -161,7 +161,7 @@ az role assignment list --assignee $principalId
 
 ## Dockerfile Example
 
-**File**: `deployment/docker/frontend.Dockerfile` (production build)
+**File**: `deployment/docker/web.Dockerfile` (production build)
 
 ```dockerfile
 # Stage 1: Build React Frontend

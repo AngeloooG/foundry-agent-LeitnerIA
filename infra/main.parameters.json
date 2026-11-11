@@ -25,6 +25,39 @@
     },
     "enableObo": {
       "value": "${ENABLE_OBO=false}"
+    },
+    "aiAgentVersion": {
+      "value": "${AI_AGENT_VERSION=}"
+    },
+    "containerCpu": {
+      "value": "${CONTAINER_CPU=0.5}"
+    },
+    "containerMemory": {
+      "value": "${CONTAINER_MEMORY=1Gi}"
+    },
+    "minReplicas": {
+      "value": "${CONTAINER_MIN_REPLICAS=0}"
+    },
+    "maxReplicas": {
+      "value": "${CONTAINER_MAX_REPLICAS=3}"
+    },
+    "allowedIpRanges": {
+      "value": "${INGRESS_ALLOWED_IP_RANGES=[]}"
+    },
+    "logRetentionDays": {
+      "value": "${LOG_RETENTION_DAYS=30}"
+    },
+    "logDailyQuotaGb": {
+      "value": "${LOG_DAILY_QUOTA_GB=-1}"
+    },
+    "containerRegistrySku": {
+      "value": "${CONTAINER_REGISTRY_SKU=Basic}"
+    },
+    "enableEntraTelemetryAuth": {
+      "value": "${ENABLE_ENTRA_TELEMETRY_AUTH=false}"
+    },
+    "requireUserAssignment": {
+      "value": "${ENTRA_REQUIRE_USER_ASSIGNMENT=true}"
     }
   }
 }

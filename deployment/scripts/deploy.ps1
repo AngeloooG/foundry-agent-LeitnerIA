@@ -4,23 +4,23 @@
     Deploy code updates to Azure Container Apps
 
 .DESCRIPTION
-    This script is a convenience wrapper around 'azd deploy'.
-    
-    azd deploy handles:
-    1. Building the Docker image (locally or via ACR remote build)
-    2. Passing build args (ENTRA_SPA_CLIENT_ID, ENTRA_TENANT_ID) from azd environment
-    3. Pushing to Azure Container Registry
-    4. Updating the Container App with the new image
-    
-    This is faster than 'azd up' as it skips infrastructure provisioning.
-    For infrastructure changes, use: azd up
+    Builds the container image and rolls it out to the existing Container App, without provisioning.
+
+    This repo uses azd's infra-only pattern (azure.yaml has no `services:`), so the build is done by the
+    predeploy hook (deployment/hooks/predeploy.ps1):
+    1. Builds deployment/docker/web.Dockerfile (local Docker, or ACR remote build as fallback)
+    2. Passes the public build args (ENTRA_SPA_CLIENT_ID, ENTRA_TENANT_ID, ...) from the azd environment
+    3. Pushes to Azure Container Registry with Entra ID (no admin credentials)
+    4. Updates the Container App image
+
+    For infrastructure changes use: azd provision (or azd up)
 
 .EXAMPLE
     .\deployment\scripts\deploy.ps1
     
 .EXAMPLE
-    # Or use azd directly:
-    azd deploy
+    # Or run the hook directly:
+    azd hooks run predeploy
 #>
 
 $ErrorActionPreference = "Stop"
@@ -40,12 +40,12 @@ if ($LASTEXITCODE -ne 0 -or -not $envName) {
 Write-Host "Environment: $envName" -ForegroundColor Green
 Write-Host ""
 
-# Run azd deploy
-Write-Host "Running azd deploy..." -ForegroundColor Cyan
+# Run the build + rollout hook
+Write-Host "Running predeploy hook (build + push + rollout)..." -ForegroundColor Cyan
 Write-Host "(Uses local Docker if available; otherwise ACR cloud build)" -ForegroundColor Gray
 Write-Host ""
 
-azd deploy
+azd hooks run predeploy
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Deployment failed"

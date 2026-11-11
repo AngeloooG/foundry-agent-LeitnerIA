@@ -28,7 +28,7 @@ cd backend && dotnet list package --vulnerable
 cd frontend && npm audit
 
 # Docker: lint Dockerfile for security issues (if hadolint installed)
-hadolint deployment/docker/frontend.Dockerfile
+hadolint deployment/docker/web.Dockerfile
 ```
 
 The Dockerfile runs as non-root (`USER app`). Verify this hasn't been removed after changes.

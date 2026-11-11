@@ -7,7 +7,7 @@
 ```
 deployment/
 ├── docker/              # Docker build files
-│   └── frontend.Dockerfile  # Single-container build (React + ASP.NET Core)
+│   └── web.Dockerfile       # Single-container build (React + ASP.NET Core)
 ├── hooks/               # Azure Developer CLI lifecycle hooks
 │   ├── preprovision.ps1     # Create Entra app + discover AI Foundry + generate config
 │   ├── postprovision.ps1    # Update Entra redirect URIs + assign RBAC

@@ -23,18 +23,17 @@ coverage
 .DS_Store
 *.pem
 
-# Environment files (will be set via build args or runtime env vars)
-.env*.local
-.env
-.env.development
-.env.production
+# Environment files: never send them to the build context (local or ACR Tasks upload).
+# The Dockerfile also deletes them, but excluding them here keeps them out of the uploaded context.
+**/.env
+**/.env.*
+**/*.local
 
-# NPM Configuration (INCLUDE .npmrc for custom registries)
-# If you use a custom npm registry, add .npmrc to frontend/ directory
-# and it will be copied into Docker builds
-# Note: For private registries requiring authentication, use build secrets:
-#   docker build --secret id=npmrc,src=frontend/.npmrc ...
-# DO NOT include .npmrc - it gets copied to support custom registries
+# Hook logs and azd state may contain tenant/client identifiers
+.azure
+
+# Tests are not part of the image
+backend/WebApp.Api.Tests
 
 # Git
 .git

@@ -9,6 +9,9 @@ param serviceManagementReference string = ''
 @description('Enable OBO backend API app registration for user-delegated access to Agent Service')
 param enableObo bool = false
 
+@description('Only users/groups assigned to the enterprise application can sign in (appRoleAssignmentRequired)')
+param requireUserAssignment bool = true
+
 // ============================================================================
 // Well-known first-party app IDs and scope IDs (stable across all Entra tenants)
 // ============================================================================
@@ -57,6 +60,10 @@ resource app 'Microsoft.Graph/applications@v1.0' = {
 
 resource sp 'Microsoft.Graph/servicePrincipals@v1.0' = {
   appId: app.appId
+  // Without this, every user in the tenant can sign in and consume model tokens.
+  // Assign users or a security group in Entra ID > Enterprise applications > Users and groups
+  // (postprovision assigns ENTRA_ALLOWED_GROUP_ID and the deploying user).
+  appRoleAssignmentRequired: requireUserAssignment
 }
 
 // ============================================================================
@@ -109,7 +116,7 @@ resource backendApp 'Microsoft.Graph/applications@v1.0' = if (enableObo) {
 }
 
 resource backendSp 'Microsoft.Graph/servicePrincipals@v1.0' = if (enableObo) {
-  appId: enableObo ? backendApp.appId : 'placeholder'
+  appId: enableObo ? backendApp!.appId : 'placeholder'
 }
 
 // ============================================================================
@@ -124,13 +131,13 @@ resource azureMachineLearningServiceSp 'Microsoft.Graph/servicePrincipals@v1.0' 
 // Grant admin consent: backend app → Azure Machine Learning Services / user_impersonation
 // consentType 'AllPrincipals' = admin consent for all users in the tenant
 resource oboAdminConsent 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = if (enableObo) {
-  clientId: backendSp.id
+  clientId: backendSp!.id
   consentType: 'AllPrincipals'
-  resourceId: azureMachineLearningServiceSp.id
+  resourceId: azureMachineLearningServiceSp!.id
   scope: 'user_impersonation'
 }
 
 output clientAppId string = app.appId
 output appObjectId string = app.id
-output backendClientAppId string = enableObo ? backendApp.appId : ''
-output backendAppObjectId string = enableObo ? backendApp.id : ''
+output backendClientAppId string = enableObo ? backendApp!.appId : ''
+output backendAppObjectId string = enableObo ? backendApp!.id : ''

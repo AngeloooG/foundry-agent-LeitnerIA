@@ -35,14 +35,21 @@ $app = az ad app show --id $clientId | ConvertFrom-Json
 $objectId = $app.id
 $identifierUri = "api://$clientId"
 
+# Localhost redirect URIs only for environments used for local development.
+# Production registrations must not accept http://localhost (a local process could capture the auth code).
+$allowLocalhost = (azd env get-value ENTRA_ALLOW_LOCALHOST_REDIRECTS 2>$null) -eq "true"
+$redirectUris = @($containerAppUrl)
+if ($allowLocalhost) {
+    $redirectUris += @("http://localhost:8080", "http://localhost:5173")
+    Write-Host "[INFO] Localhost redirect URIs enabled (ENTRA_ALLOW_LOCALHOST_REDIRECTS=true)" -ForegroundColor Gray
+} else {
+    Write-Host "[INFO] Localhost redirect URIs disabled. For local dev: azd env set ENTRA_ALLOW_LOCALHOST_REDIRECTS true" -ForegroundColor Gray
+}
+
 $patchBody = @{
     identifierUris = @($identifierUri)
     spa = @{
-        redirectUris = @(
-            "http://localhost:8080",
-            "http://localhost:5173",
-            $containerAppUrl
-        )
+        redirectUris = $redirectUris
     }
 } | ConvertTo-Json -Depth 10
 
@@ -135,42 +142,90 @@ if ($backendClientId) {
     Write-Host "[OK] OBO configuration complete" -ForegroundColor Green
 }
 
-# Assign RBAC roles to web managed identity on AI Foundry resource
-# - Cognitive Services User: wildcard data action (covers AIServices/agents/*)
-# - Cognitive Services OpenAI Contributor: model access, conversations (OpenAI/*)
-# - Azure AI Developer: v2 agents API (SpeechServices, ContentSafety, MaaS)
-# Done via CLI (not Bicep) to prevent azd from tracking the external resource group
-if ($webIdentityPrincipalId -and $aiFoundryResourceGroup -and $aiFoundryResourceName -and $subscriptionId) {
-    Write-Host "Assigning AI Foundry RBAC roles to web app identity..." -ForegroundColor Yellow
-    
-    $scope = "/subscriptions/$subscriptionId/resourceGroups/$aiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$aiFoundryResourceName"
-    
-    $roles = @("Cognitive Services User", "Cognitive Services OpenAI Contributor", "Azure AI Developer")
-    foreach ($roleName in $roles) {
-        $existingAssignment = az role assignment list `
-            --assignee $webIdentityPrincipalId `
-            --role $roleName `
-            --scope $scope 2>$null | ConvertFrom-Json
-        
-        if ($existingAssignment -and $existingAssignment.Count -gt 0) {
-            Write-Host "[OK] $roleName — already assigned" -ForegroundColor Green
+# Assign the least-privilege Foundry role to the web managed identity, scoped to the PROJECT (not the account).
+# "Foundry User" (formerly "Azure AI User", id 53ca6127-...) covers the Foundry data plane the app needs:
+# agents, responses, conversations and files. The role id is used because display names change.
+# Replaces the previous three account-level roles (Cognitive Services User, Cognitive Services OpenAI
+# Contributor, Azure AI Developer). Done via CLI (not Bicep) so azd does not track the external resource group.
+# SECURITY REVIEW: RBAC changes must be reviewed by a senior engineer before production.
+$foundryUserRoleId = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
+$legacyRoles = @("Cognitive Services User", "Cognitive Services OpenAI Contributor", "Azure AI Developer")
+$aiAgentEndpointForRbac = azd env get-value AI_AGENT_ENDPOINT 2>$null
+$projectName = if ($aiAgentEndpointForRbac -match '/api/projects/([^/?]+)') { $Matches[1] } else { $null }
+
+if ($webIdentityPrincipalId -and $aiFoundryResourceGroup -and $aiFoundryResourceName -and $subscriptionId -and $projectName) {
+    $accountScope = "/subscriptions/$subscriptionId/resourceGroups/$aiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$aiFoundryResourceName"
+    $projectScope = "$accountScope/projects/$projectName"
+    Write-Host "Assigning 'Foundry User' on project '$projectName' to the web identity..." -ForegroundColor Yellow
+
+    $existing = az role assignment list --assignee $webIdentityPrincipalId --role $foundryUserRoleId --scope $projectScope 2>$null | ConvertFrom-Json
+    if ($existing -and $existing.Count -gt 0) {
+        Write-Host "[OK] Foundry User - already assigned" -ForegroundColor Green
+    } else {
+        az role assignment create `
+            --assignee-object-id $webIdentityPrincipalId `
+            --assignee-principal-type ServicePrincipal `
+            --role $foundryUserRoleId `
+            --scope $projectScope | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] Foundry User - assigned (RBAC can take a few minutes to propagate)" -ForegroundColor Green
         } else {
-            az role assignment create `
-                --assignee-object-id $webIdentityPrincipalId `
-                --assignee-principal-type ServicePrincipal `
-                --role $roleName `
-                --scope $scope | Out-Null
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] $roleName — assigned" -ForegroundColor Green
-            } else {
-                Write-Host "[WARN] $roleName — failed (you may need to assign manually)" -ForegroundColor Yellow
+            Write-Host "[WARN] Foundry User - failed (assign manually or check your permissions)" -ForegroundColor Yellow
+        }
+    }
+
+    # Opt-in removal of the broader legacy roles (account and project scope) once 'Foundry User' is verified.
+    if ((azd env get-value REMOVE_LEGACY_FOUNDRY_ROLES 2>$null) -eq "true") {
+        foreach ($scope in @($accountScope, $projectScope)) {
+            foreach ($roleName in $legacyRoles) {
+                az role assignment delete --assignee $webIdentityPrincipalId --role $roleName --scope $scope 2>$null | Out-Null
             }
         }
+        Write-Host "[OK] Legacy Foundry roles removed (REMOVE_LEGACY_FOUNDRY_ROLES=true)" -ForegroundColor Green
+    } else {
+        Write-Host "[INFO] Legacy roles are kept. After verifying the app works with 'Foundry User':" -ForegroundColor Gray
+        Write-Host "       azd env set REMOVE_LEGACY_FOUNDRY_ROLES true; azd hooks run postprovision" -ForegroundColor Gray
     }
 } else {
     Write-Host "[SKIP] AI Foundry role assignment - missing configuration" -ForegroundColor Yellow
-    Write-Host "  Set AI_FOUNDRY_RESOURCE_GROUP and AI_FOUNDRY_RESOURCE_NAME environment variables" -ForegroundColor Gray
+    Write-Host "  Requires AI_FOUNDRY_RESOURCE_GROUP, AI_FOUNDRY_RESOURCE_NAME and AI_AGENT_ENDPOINT (.../api/projects/<name>)" -ForegroundColor Gray
+}
+
+# User assignment: the enterprise app requires assignment (requireUserAssignment=true in Bicep).
+# Assign the deploying user (avoids locking yourself out) and, optionally, a security group (e.g. sales team).
+$spaSpObjectId = az ad sp show --id $clientId --query "id" -o tsv 2>$null
+$defaultAccessRoleId = "00000000-0000-0000-0000-000000000000"
+$principalsToAssign = @()
+$signedInUserId = az ad signed-in-user show --query "id" -o tsv 2>$null
+if ($signedInUserId) { $principalsToAssign += $signedInUserId }
+$allowedGroupId = azd env get-value ENTRA_ALLOWED_GROUP_ID 2>$null
+if ($allowedGroupId -and $allowedGroupId -notmatch 'ERROR') { $principalsToAssign += $allowedGroupId.Trim() }
+
+if ($spaSpObjectId) {
+    $assigned = @(az rest --method GET --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spaSpObjectId/appRoleAssignedTo" --query "value[].principalId" -o tsv 2>$null)
+    foreach ($principalId in $principalsToAssign) {
+        if ($assigned -contains $principalId) {
+            Write-Host "[OK] App assignment exists for $principalId" -ForegroundColor Green
+            continue
+        }
+        $assignmentBody = @{ principalId = $principalId; resourceId = $spaSpObjectId; appRoleId = $defaultAccessRoleId } | ConvertTo-Json
+        $assignmentFile = [System.IO.Path]::GetTempFileName()
+        try {
+            $assignmentBody | Out-File -FilePath $assignmentFile -Encoding utf8
+            az rest --method POST --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spaSpObjectId/appRoleAssignedTo" `
+                --headers "Content-Type=application/json" --body "@$assignmentFile" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[OK] Assigned $principalId to the LeitnerIA enterprise app" -ForegroundColor Green
+            } else {
+                Write-Host "[WARN] Could not assign $principalId (requires Application Administrator or app owner)" -ForegroundColor Yellow
+            }
+        } finally {
+            Remove-Item $assignmentFile -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not $allowedGroupId) {
+        Write-Host "[INFO] To grant access to the sales team: azd env set ENTRA_ALLOWED_GROUP_ID <group-object-id>" -ForegroundColor Gray
+    }
 }
 
 # Generate local dev config files (moved from preprovision — clientId comes from Bicep)
@@ -189,13 +244,11 @@ if ($backendClientId) {
 }
 $frontendEnv | Out-File -FilePath "frontend/.env.local" -Encoding utf8 -Force
 
-# Backend .env
+# Backend .env (identifiers only - no secrets; in Development the API uses your Azure CLI login)
 $backendEnvContent = @"
 # Auto-generated - Do not commit
-AzureAd__Instance=https://login.microsoftonline.com/
-AzureAd__TenantId=$tenantId
-AzureAd__ClientId=$clientId
-AzureAd__Audience=api://$clientId
+ENTRA_SPA_CLIENT_ID=$clientId
+ENTRA_TENANT_ID=$tenantId
 AI_AGENT_ENDPOINT=$aiAgentEndpoint
 AI_AGENT_ID=$aiAgentId
 "@
