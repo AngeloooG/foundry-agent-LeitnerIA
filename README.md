@@ -247,6 +247,7 @@ VENTAS.md       Documentación comercial
 ## Documentación relacionada
 
 - [ARCHITECTURE-FLOW.md](ARCHITECTURE-FLOW.md): flujo técnico de punta a punta.
+- [docs/decisiones-arquitectura.md](docs/decisiones-arquitectura.md): patrones aplicados y descartados, con su justificación.
 - [backend/README.md](backend/README.md) y [frontend/README.md](frontend/README.md).
 - [infra/README.md](infra/README.md): recursos, parámetros, costos y postura de seguridad.
 - [deployment/README.md](deployment/README.md): hooks y scripts.
