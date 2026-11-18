@@ -39,12 +39,15 @@ try {
     # Architecture-sensitive file names
     $sensitiveFiles = @(
         'Program.cs',
-        'AgentFrameworkService.cs',
-        'AppContext.tsx',
-        'appReducer.ts',
-        'chatService.ts',
-        'ChatInterface.tsx',
-        'AgentChat.tsx'
+        'ChatEndpoints.cs',
+        'ChatService.cs',
+        'ConversationService.cs',
+        'FoundryAgentGateway.cs',
+        'SecurityServiceCollectionExtensions.cs',
+        'ChatStreamEvents.cs',
+        'AgentConsoleProvider.tsx',
+        'consoleState.ts',
+        'agentStreamClient.ts'
     )
 
     # Check if the edited file matches any sensitive file

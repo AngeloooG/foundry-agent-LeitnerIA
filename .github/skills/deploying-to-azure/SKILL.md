@@ -75,7 +75,7 @@ runSubagent(
 
 Build order: React → .NET → Runtime
 
-- Frontend: `deployment/docker/frontend.Dockerfile`
+- Frontend: `deployment/docker/web.Dockerfile`
 - Backend: `deployment/docker/backend.Dockerfile`
 - Custom npm registries: Add `.npmrc` to `frontend/` directory
 
@@ -99,7 +99,7 @@ azd provision
 
 | Issue | Fix |
 |-------|-----|
-| `VITE_ENTRA_SPA_CLIENT_ID not set` | Run `azd up` to generate `.env` files |
+| `VITE_ENTRA_FRONTEND_CLIENT_ID not set` | Run `azd up` to generate `.env` files |
 | `AI_AGENT_ENDPOINT not configured` | Run `azd provision` to re-discover AI Foundry |
 | No AI Foundry resources found | Create at https://ai.azure.com |
 | Multiple AI Foundry resources | Run `azd provision` to select different resource |
@@ -161,12 +161,12 @@ az role assignment list --assignee $principalId
 
 ## Dockerfile Example
 
-**File**: `deployment/docker/frontend.Dockerfile` (production build)
+**File**: `deployment/docker/web.Dockerfile` (production build)
 
 ```dockerfile
 # Stage 1: Build React Frontend
 FROM node:22-alpine AS frontend-builder
-ARG ENTRA_SPA_CLIENT_ID
+ARG ENTRA_FRONTEND_CLIENT_ID
 ARG ENTRA_TENANT_ID
 WORKDIR /app/frontend
 COPY frontend/ ./
@@ -174,7 +174,7 @@ RUN npm ci
 # Remove local .env files to prevent localhost config
 RUN rm -f .env.local .env.development .env
 ENV NODE_ENV=production
-ENV VITE_ENTRA_SPA_CLIENT_ID=$ENTRA_SPA_CLIENT_ID
+ENV VITE_ENTRA_FRONTEND_CLIENT_ID=$ENTRA_FRONTEND_CLIENT_ID
 ENV VITE_ENTRA_TENANT_ID=$ENTRA_TENANT_ID
 RUN npm run build
 

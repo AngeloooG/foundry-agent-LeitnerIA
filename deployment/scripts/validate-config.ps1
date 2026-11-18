@@ -22,7 +22,8 @@ Write-Host "Frontend config:" -ForegroundColor Cyan
 $frontendEnv = Join-Path $projectRoot "frontend/.env.local"
 if (Test-Path $frontendEnv) {
     $content = Get-Content $frontendEnv -Raw
-    if (-not (Test-EnvVar $content "VITE_ENTRA_SPA_CLIENT_ID" "frontend/.env.local")) { $null = $validationErrors.Add("VITE_ENTRA_SPA_CLIENT_ID") }
+    if (-not (Test-EnvVar $content "VITE_ENTRA_FRONTEND_CLIENT_ID" "frontend/.env.local")) { $null = $validationErrors.Add("VITE_ENTRA_FRONTEND_CLIENT_ID") }
+    if (-not (Test-EnvVar $content "VITE_ENTRA_BACKEND_CLIENT_ID" "frontend/.env.local")) { $null = $validationErrors.Add("VITE_ENTRA_BACKEND_CLIENT_ID") }
     if (-not (Test-EnvVar $content "VITE_ENTRA_TENANT_ID" "frontend/.env.local")) { $null = $validationErrors.Add("VITE_ENTRA_TENANT_ID") }
 } else {
     $null = $validationErrors.Add("frontend/.env.local not found")

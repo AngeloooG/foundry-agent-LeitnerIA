@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
 import { fileURLToPath } from "url";
+import { buildInfoPlugin } from "./plugins/buildInfo";
 import { envCheckPlugin } from "./plugins/envcheck";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,11 +19,13 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, envDir, "");
   
   // Map to VITE_ prefixed vars for client access (Vite only exposes VITE_ prefixed vars)
-  process.env.VITE_ENTRA_SPA_CLIENT_ID = env.ENTRA_SPA_CLIENT_ID || env.VITE_ENTRA_SPA_CLIENT_ID;
+  // Only these public identifiers are exposed to the bundle; nothing else from the azd environment is inlined.
+  process.env.VITE_ENTRA_FRONTEND_CLIENT_ID = env.ENTRA_FRONTEND_CLIENT_ID || env.VITE_ENTRA_FRONTEND_CLIENT_ID;
+  process.env.VITE_ENTRA_BACKEND_CLIENT_ID = env.ENTRA_BACKEND_CLIENT_ID || env.VITE_ENTRA_BACKEND_CLIENT_ID;
   process.env.VITE_ENTRA_TENANT_ID = env.ENTRA_TENANT_ID || env.VITE_ENTRA_TENANT_ID;
 
   return {
-    plugins: [react(), envCheckPlugin()],
+    plugins: [react(), envCheckPlugin(), buildInfoPlugin()],
     resolve: {
       alias: {
         "~": resolve(__dirname, "./src"),

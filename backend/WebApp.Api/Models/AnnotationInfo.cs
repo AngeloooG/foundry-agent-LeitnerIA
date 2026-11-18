@@ -37,11 +37,6 @@ public record AnnotationInfo
     public string? ContainerId { get; init; }
     
     /// <summary>
-    /// The placeholder text in the response to replace (e.g., "【4:0†source】").
-    /// </summary>
-    public string? TextToReplace { get; init; }
-    
-    /// <summary>
     /// Start index in the text where the citation applies.
     /// </summary>
     public int? StartIndex { get; init; }

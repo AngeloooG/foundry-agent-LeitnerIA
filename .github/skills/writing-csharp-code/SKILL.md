@@ -164,9 +164,9 @@ app.UseAuthorization();    // Enforce scope
 app.MapFallbackToFile("index.html");  // MUST BE LAST
 ```
 
-## Project-Specific: AgentFrameworkService
+## Project-Specific: Foundry adapters (FoundryAgentGateway / FoundryConversationStore)
 
-**See**: `backend/WebApp.Api/Services/AgentFrameworkService.cs`
+**See**: `backend/WebApp.Api/Infrastructure/Foundry/FoundryAgentGateway.cs`
 
 **SDK Packages**:
 - `Azure.AI.Projects` — Main entry point, v2 Agents API (see `*.csproj` for version)

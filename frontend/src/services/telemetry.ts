@@ -1,5 +1,10 @@
-import { ApplicationInsights } from '@microsoft/applicationinsights-web';
+import { ApplicationInsights } from "@microsoft/applicationinsights-web";
 
+/**
+ * Browser telemetry (Application Insights). The connection string is an ingestion key that is public by design
+ * (it ships in the bundle); it is not access control. No user content is ever sent: only exceptions with generic
+ * messages, page views and timing of /api calls.
+ */
 const connectionString = import.meta.env.VITE_APPLICATIONINSIGHTS_CONNECTION_STRING;
 
 let appInsights: ApplicationInsights | null = null;
@@ -10,33 +15,21 @@ export function initTelemetry(): void {
   appInsights = new ApplicationInsights({
     config: {
       connectionString,
-      enableAutoRouteTracking: false, // SPA with no router
+      enableAutoRouteTracking: true, // react-router navigation (/ and /agente)
       disableFetchTracking: false,
-      enableCorsCorrelation: true,
+      // Same-origin API: no correlation headers are sent to third parties (Entra ID, fonts).
+      enableCorsCorrelation: false,
       enableRequestHeaderTracking: false,
-      enableResponseHeaderTracking: true,
+      enableResponseHeaderTracking: false,
       enableUnhandledPromiseRejectionTracking: true,
+      disableCookiesUsage: true,
     },
   });
 
   appInsights.loadAppInsights();
 }
 
+/** Records an exception. Callers must pass generic errors and properties without user content. */
 export function trackException(error: Error, properties?: Record<string, string>): void {
   appInsights?.trackException({ exception: error }, properties);
-}
-
-export function trackEvent(name: string, properties?: Record<string, string>): void {
-  appInsights?.trackEvent({ name }, properties);
-}
-
-export function trackFeedback(messageId: string, conversationId: string | null, rating: 'positive' | 'negative'): void {
-  appInsights?.trackEvent({
-    name: 'message_feedback',
-    properties: {
-      messageId,
-      conversationId: conversationId ?? '',
-      rating,
-    },
-  });
 }

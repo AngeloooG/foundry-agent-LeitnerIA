@@ -1,71 +1,48 @@
-# Deployment Directory
+# LeitnerIA: despliegue
 
-**AI Assistance**: See `.github/skills/deploying-to-azure/SKILL.md` for deployment patterns.
+## Estructura
 
-## Structure
-
-```
+```text
 deployment/
-├── docker/              # Docker build files
-│   └── frontend.Dockerfile  # Single-container build (React + ASP.NET Core)
-├── hooks/               # Azure Developer CLI lifecycle hooks
-│   ├── preprovision.ps1     # Create Entra app + discover AI Foundry + generate config
-│   ├── postprovision.ps1    # Update Entra redirect URIs + assign RBAC
-│   ├── predeploy.ps1        # Build container (local Docker or ACR cloud build)
-│   ├── postdown.ps1         # Cleanup (optional)
-│   └── modules/             # Reusable PowerShell modules
-│       ├── Get-AIFoundryAgents.ps1
-│       └── New-EntraAppRegistration.ps1
-└── scripts/             # User-invoked scripts
-    └── start-local-dev.ps1  # Start native local development
+├── docker/
+│   └── web.Dockerfile                 Imagen única: build de Vite → dotnet publish → aspnet:10.0-alpine (no root)
+├── hooks/                             Hooks de Azure Developer CLI (ver hooks/README.md)
+│   ├── preprovision.ps1               Descubre la cuenta y el proyecto de Foundry y el agente (sin elegir en silencio)
+│   ├── postprovision.ps1              Configura Entra (URIs), OBO, rol "Foundry User", asignación de usuarios, .env locales
+│   ├── predeploy.ps1                  Construye la imagen (Docker local o ACR), la sube y actualiza el Container App
+│   ├── postdown.ps1                   Elimina las apps de Entra (incluida OBO), los roles en Foundry y los .env locales
+│   └── modules/                       Get-AIFoundryAgents.ps1, HookLogging.ps1
+└── scripts/
+    ├── start-local-dev.ps1            Backend (dotnet watch) + frontend (Vite) en local
+    ├── deploy.ps1                     Solo código: ejecuta el hook predeploy
+    ├── set-environment-profile.ps1    Perfil dev/prod (tamaños, retención, seguridad) en el entorno azd
+    ├── harden-external-resources.ps1  Endurecimiento del servidor MCP, su storage y Foundry (dry run por defecto)
+    ├── list-agents.ps1                Lista los agentes del proyecto de Foundry
+    ├── validate-config.ps1            Verifica la configuración local
+    └── test-cli-compatibility.ps1     Prueba de las instrucciones del repositorio para GitHub Copilot CLI
 ```
 
-## Build Strategy
+## Comandos
 
-Container builds use **local Docker when available** with **ACR cloud build as fallback**:
+| Comando | Uso |
+|---|---|
+| `./deployment/scripts/set-environment-profile.ps1 -Profile dev\|prod` | Configura el entorno antes de aprovisionar |
+| `azd provision --preview` | Revisa los cambios de infraestructura sin aplicarlos |
+| `azd up` | Aprovisiona y despliega (primera vez o cambios de infraestructura) |
+| `./deployment/scripts/deploy.ps1` | Despliega solo los cambios de código |
+| `azd down --purge` | Elimina el entorno (más la limpieza de `postdown`) |
 
-| Docker Installed | Build Method | Speed |
-|------------------|--------------|-------|
-| ✅ Yes, running | Local Docker build + push to ACR | ~2 min |
-| ❌ No | ACR cloud build | ~4-5 min |
+## Construcción de la imagen
 
-This is handled automatically by `predeploy.ps1`.
+`predeploy.ps1` usa Docker local si está disponible (~2 minutos) y, si no, ACR Tasks (~4-5 minutos). La imagen se etiqueta `web:deploy-<timestamp>` y se sube autenticada con Entra ID; el usuario admin de ACR está deshabilitado.
 
-## Key Commands
+Argumentos de build (identificadores públicos, no secretos): `ENTRA_FRONTEND_CLIENT_ID`, `ENTRA_BACKEND_CLIENT_ID` (ambos obligatorios), `ENTRA_TENANT_ID` y `APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING`. `.dockerignore` excluye `**/.env*`, `.azure` y las pruebas del contexto de build.
 
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| `azd up` | Full provision + deploy | Initial setup, infrastructure changes |
-| `azd deploy` | Code-only deployment | Fast iteration on code changes |
-| `azd down` | Tear down resources | Cleanup |
+## Antes de producción (checklist)
 
-## Hook Workflow
-
-```
-azd up
-  ├─ preprovision.ps1 (Entra + AI Foundry discovery + .env generation)
-  ├─ provision (Bicep deployment with placeholder image)
-  ├─ postprovision.ps1 (updates Entra redirect URIs + RBAC)
-  └─ predeploy.ps1 (builds container - local Docker or ACR cloud)
-
-azd deploy
-  └─ predeploy.ps1 (builds + pushes + updates Container App)
-```
-
-## Quick Reference
-
-**Common tasks**:
-- First deployment: `azd up`
-- Deploy code changes: `azd deploy`
-- Local development: `.\deployment\scripts\start-local-dev.ps1`
-- Clean up: `azd down --force --purge`
-
-## Docker Details
-
-**Build strategy**: Multi-stage (React build → .NET build → Runtime)
-
-**Build args**: Client ID and Tenant ID are automatically passed to the Dockerfile from azd environment variables.
-
-**Custom npm registries**: Add `.npmrc` to `frontend/` directory - automatically copied during build
-
-For AI-assisted development, see `.github/skills/deploying-to-azure/SKILL.md`.
+1. Revisión senior de los cambios de RBAC, Entra ID y red.
+2. Perfil `prod` aplicado. `ENTRA_ALLOWED_GROUP_ID` es opcional: déjelo vacío para dar acceso a todo el tenant.
+3. `azd provision --preview` revisado.
+4. Después del despliegue, verificar el inicio de sesión, la generación de una Battlecard y el enlace a SharePoint.
+5. Retirar los roles heredados: `azd env set REMOVE_LEGACY_FOUNDRY_ROLES true; azd hooks run postprovision`.
+6. Revisar `harden-external-resources.ps1` con los responsables del servidor MCP y de Foundry.

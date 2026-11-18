@@ -13,16 +13,11 @@ export default defineConfig([
       js.configs.recommended,
       tseslint.configs.recommended,
       reactRefresh.configs.vite,
+      // Full React Compiler-aware rule set (refs during render, impure render, set-state-in-effect, ...)
+      reactHooks.configs.flat.recommended,
     ],
-    plugins: {
-      'react-hooks': reactHooks,
-    },
-    rules: {
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
-    },
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2022,
       globals: globals.browser,
     },
   },

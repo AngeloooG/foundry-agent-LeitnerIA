@@ -1,7 +1,8 @@
 import type { Plugin, ViteDevServer } from "vite";
 
 const REQUIRED_VARS = [
-  "VITE_ENTRA_SPA_CLIENT_ID",
+  "VITE_ENTRA_FRONTEND_CLIENT_ID",
+  "VITE_ENTRA_BACKEND_CLIENT_ID",
   "VITE_ENTRA_TENANT_ID",
 ] as const;
 

@@ -28,7 +28,7 @@ cd backend && dotnet list package --vulnerable
 cd frontend && npm audit
 
 # Docker: lint Dockerfile for security issues (if hadolint installed)
-hadolint deployment/docker/frontend.Dockerfile
+hadolint deployment/docker/web.Dockerfile
 ```
 
 The Dockerfile runs as non-root (`USER app`). Verify this hasn't been removed after changes.
@@ -48,7 +48,8 @@ azd up --no-prompt
 
 ```powershell
 $endpoint = azd env get-value WEB_ENDPOINT
-node deployment/scripts/smoke-test.js $endpoint
+# Manual smoke test: sign in, open /agente, prepare and send a Battlecard request, cancel one run
+# curl -sI $endpoint/api/health   # expect 200 + Content-Security-Policy / Strict-Transport-Security headers
 ```
 
 Verify: health 200, agent name displayed, chat streaming works, token usage visible.
@@ -65,7 +66,7 @@ cd ../../frontend
 npm run dev &
 
 # Wait for both servers, then:
-node deployment/scripts/smoke-test.js http://localhost:5173
+# Manual smoke test against http://localhost:5173 (smoke-test.js was removed with the template chat UI)
 ```
 
 ### 4. Teardown
