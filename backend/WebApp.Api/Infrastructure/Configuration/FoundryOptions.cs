@@ -34,6 +34,9 @@ public sealed class FoundryOptions
 
     public string? TenantId { get; set; }
 
+    /// <summary><c>ENTRA_SINGLE_APP_REGISTRATION=true</c>: there is no separate backend registration to run OBO with.</summary>
+    public bool SingleAppRegistration { get; set; }
+
     /// <summary>How long the resolved agent definition is cached. Publishing a new version is picked up after this period.</summary>
     public TimeSpan AgentCacheDuration { get; set; } = TimeSpan.FromMinutes(10);
 
@@ -47,6 +50,8 @@ public sealed class FoundryOptions
         options.ManagedIdentityClientId = NullIfEmpty(configuration["MANAGED_IDENTITY_CLIENT_ID"] ?? configuration["OBO_MANAGED_IDENTITY_CLIENT_ID"]);
         options.BackendClientId = NullIfEmpty(configuration["ENTRA_BACKEND_CLIENT_ID"]);
         options.TenantId = NullIfEmpty(configuration["ENTRA_TENANT_ID"]);
+        // Invalid values are reported by EntraOptions; here only an explicit "true" counts.
+        options.SingleAppRegistration = string.Equals(configuration["ENTRA_SINGLE_APP_REGISTRATION"]?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
 
         var enableObo = configuration["ENABLE_OBO"]?.Trim();
         if (string.IsNullOrEmpty(enableObo) || string.Equals(enableObo, "false", StringComparison.OrdinalIgnoreCase))
@@ -78,6 +83,8 @@ public sealed class FoundryOptions
                 yield return "OBO mode (ENABLE_OBO=true) requires MANAGED_IDENTITY_CLIENT_ID for the federated credential.";
             if (string.IsNullOrWhiteSpace(BackendClientId) || string.IsNullOrWhiteSpace(TenantId))
                 yield return "OBO mode (ENABLE_OBO=true) requires ENTRA_BACKEND_CLIENT_ID and ENTRA_TENANT_ID.";
+            if (SingleAppRegistration)
+                yield return "OBO mode (ENABLE_OBO=true) requires a separate backend registration (ENTRA_SINGLE_APP_REGISTRATION=false).";
         }
     }
 

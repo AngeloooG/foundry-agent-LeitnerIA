@@ -22,8 +22,14 @@ if (-not $clientId -or -not $backendClientId) {
     Write-Host "[ERROR] ENTRA_FRONTEND_CLIENT_ID / ENTRA_BACKEND_CLIENT_ID not set (Bicep outputs)" -ForegroundColor Red
     exit 1
 }
-if ($clientId -eq $backendClientId) {
-    Write-Host "[ERROR] Frontend and backend registrations must be different apps" -ForegroundColor Red
+$singleAppRaw = (azd env get-value ENTRA_SINGLE_APP_REGISTRATION 2>$null) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
+$singleApp = $singleAppRaw -and $singleAppRaw.Trim().ToLowerInvariant() -eq "true"
+if ($singleApp -and $clientId -ne $backendClientId) {
+    Write-Host "[ERROR] ENTRA_SINGLE_APP_REGISTRATION=true but the Bicep outputs have different frontend/backend ids" -ForegroundColor Red
+    exit 1
+}
+if (-not $singleApp -and $clientId -eq $backendClientId) {
+    Write-Host "[ERROR] Frontend and backend registrations must be different apps (or set ENTRA_SINGLE_APP_REGISTRATION=true for development)" -ForegroundColor Red
     exit 1
 }
 if (-not $containerAppUrl) {
@@ -82,14 +88,22 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[OK] SPA redirect URIs updated" -ForegroundColor Green
 
-# Backend API: identifierUri api://<backend client id> (cannot be set in Bicep: it references the app's own appId).
+# API audience: identifierUri api://<backend client id> (cannot be set in Bicep: it references the app's own appId).
 # The SPA requests api://<backend client id>/Chat.ReadWrite.
-az ad app update --id $backendClientId --identifier-uris "api://$backendClientId" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Failed to set identifierUri on the backend app" -ForegroundColor Red
-    exit 1
+$apiUri = "api://$backendClientId"
+$currentUris = @(az ad app show --id $backendClientId --query "identifierUris" -o json 2>$null | ConvertFrom-Json)
+if ($currentUris -contains $apiUri) {
+    Write-Host "[OK] API identifier URI already set: $apiUri" -ForegroundColor Green
+} else {
+    # Single registration: keep any other URI the SPA registration already has; only add the API one.
+    $newUris = if ($singleApp) { @($currentUris | Where-Object { $_ }) + $apiUri } else { @($apiUri) }
+    az ad app update --id $backendClientId --identifier-uris @newUris 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to set identifierUri $apiUri" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[OK] API identifier URI: $apiUri" -ForegroundColor Green
 }
-Write-Host "[OK] Backend identifier URI: api://$backendClientId" -ForegroundColor Green
 
 # OBO (ENABLE_OBO=true only): federated identity credential MI -> backend app (secretless). Created here, not in
 # Bicep, because Graph eventual consistency makes child resources fail right after the parent app is created.

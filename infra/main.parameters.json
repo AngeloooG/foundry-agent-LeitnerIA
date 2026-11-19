@@ -65,6 +65,9 @@
     "entraGrantSpaAdminConsent": {
       "value": "${ENTRA_GRANT_SPA_ADMIN_CONSENT=false}"
     },
+    "entraSingleAppRegistration": {
+      "value": "${ENTRA_SINGLE_APP_REGISTRATION=false}"
+    },
     "defaultTags": {
       "value": {
         "Agente": "${TAG_AGENTE=LeitnerIA}",

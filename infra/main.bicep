@@ -31,6 +31,9 @@ param entraAllowLocalhostRedirects bool = false
 @description('Grant tenant-wide admin consent SPA -> backend Chat.ReadWrite (requires an Entra admin role)')
 param entraGrantSpaAdminConsent bool = false
 
+@description('Development only: one Entra registration (the SPA) is also the API audience; no backend registration and no new consent. Not compatible with OBO.')
+param entraSingleAppRegistration bool = false
+
 @description('Container image for web service (set by postprovision hook)')
 param webImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'  // Placeholder during initial provision
 
@@ -122,6 +125,7 @@ module entraApp 'entra-app.bicep' = {
     allowedGroupId: entraAllowedGroupId
     allowLocalhostRedirects: entraAllowLocalhostRedirects
     grantSpaAdminConsent: entraGrantSpaAdminConsent
+    singleAppRegistration: entraSingleAppRegistration
   }
 }
 
@@ -142,6 +146,7 @@ module app 'main-app.bicep' = {
     entraTenantId: entraTenantId
     entraBackendClientId: entraApp.outputs.backendClientId
     enableObo: enableObo
+    entraSingleAppRegistration: entraSingleAppRegistration
     entraAllowedGroupId: entraAllowedGroupId
     webImageName: webImageName
     userAssignedIdentityId: infrastructure.outputs.managedIdentityId

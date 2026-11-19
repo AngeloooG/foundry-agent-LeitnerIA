@@ -29,10 +29,14 @@ describe("authConfig", () => {
         await expect(import("../authConfig")).rejects.toThrow("VITE_ENTRA_BACKEND_CLIENT_ID");
     });
 
-    it("rejects a backend id equal to the frontend id", async () => {
+    it("single-registration mode: requests the SPA registration's own scope", async () => {
+        // Equal ids are accepted here; the API decides (ENTRA_SINGLE_APP_REGISTRATION) and refuses to start otherwise.
         vi.stubEnv("VITE_ENTRA_FRONTEND_CLIENT_ID", FRONTEND);
-        vi.stubEnv("VITE_ENTRA_BACKEND_CLIENT_ID", FRONTEND.toUpperCase());
+        vi.stubEnv("VITE_ENTRA_BACKEND_CLIENT_ID", FRONTEND);
 
-        await expect(import("../authConfig")).rejects.toThrow("must differ");
+        const { apiScope, msalConfig } = await import("../authConfig");
+
+        expect(apiScope).toBe(`api://${FRONTEND}/Chat.ReadWrite`);
+        expect(msalConfig.auth.clientId).toBe(FRONTEND);
     });
 });

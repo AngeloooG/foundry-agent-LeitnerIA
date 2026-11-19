@@ -14,6 +14,9 @@ param entraTenantId string
 param entraBackendClientId string
 @description('Backend calls Foundry On-Behalf-Of the user instead of with the managed identity')
 param enableObo bool = false
+
+@description('Single-registration development mode: ENTRA_BACKEND_CLIENT_ID equals ENTRA_FRONTEND_CLIENT_ID')
+param entraSingleAppRegistration bool = false
 @description('Optional group restriction enforced by the API (empty = every user of the tenant)')
 param entraAllowedGroupId string = ''
 param webImageName string
@@ -55,6 +58,10 @@ var baseEnv = [
   {
     name: 'ENABLE_OBO'
     value: string(enableObo)
+  }
+  {
+    name: 'ENTRA_SINGLE_APP_REGISTRATION'
+    value: string(entraSingleAppRegistration)
   }
   {
     name: 'ENTRA_TENANT_ID'

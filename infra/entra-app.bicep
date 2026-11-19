@@ -1,9 +1,12 @@
 extension microsoftGraphV1
 
 // ============================================================================
-// Entra ID app registrations for LeitnerIA (two registrations):
+// Entra ID app registrations for LeitnerIA (two registrations by default):
 //   1. Frontend SPA  - interactive sign-in, redirect URIs, requests the backend scope. No secrets.
 //   2. Backend API   - exposes Chat.ReadWrite and is the ONLY audience accepted by the API.
+// Single-registration mode (singleAppRegistration = true, development only): the backend registration is NOT
+// created; the SPA keeps exposing its own Chat.ReadWrite scope and is also the API audience (the pre-split model).
+// Use it when users cannot consent and no admin consent is available: an app requesting its own scope needs none.
 // Both are single-tenant with "Assignment required = No" (every authenticated user of the tenant).
 // Changes to this file modify the real tenant on `azd provision`: senior review required.
 // ============================================================================
@@ -22,6 +25,9 @@ param allowedGroupId string = ''
 
 @description('Add http://localhost redirect URIs to the SPA (development only). postprovision adds the Container App URL.')
 param allowLocalhostRedirects bool = false
+
+@description('Development only: one registration (the SPA) is also the API audience; no backend registration is created. Not compatible with OBO.')
+param singleAppRegistration bool = false
 
 @description('Grant tenant-wide (admin) consent SPA -> backend Chat.ReadWrite. Requires an Entra admin role. When false, users consent on first sign-in (if the tenant allows user consent).')
 param grantSpaAdminConsent bool = false
@@ -46,7 +52,7 @@ var backendChatScopeId = guid(resourceGroup().id, environmentName, 'Backend.Chat
 // Backend API registration (audience of the API)
 // ============================================================================
 
-resource backendApp 'Microsoft.Graph/applications@v1.0' = {
+resource backendApp 'Microsoft.Graph/applications@v1.0' = if (!singleAppRegistration) {
   // Same uniqueName the optional OBO registration used before: an existing backend app is updated, not recreated.
   uniqueName: 'ai-foundry-agent-backend-${environmentName}'
   displayName: 'ai-foundry-agent-backend-${environmentName}'
@@ -89,8 +95,8 @@ resource backendApp 'Microsoft.Graph/applications@v1.0' = {
   // the URI references this app's own appId and FICs fail on Graph eventual consistency.
 }
 
-resource backendSp 'Microsoft.Graph/servicePrincipals@v1.0' = {
-  appId: backendApp.appId
+resource backendSp 'Microsoft.Graph/servicePrincipals@v1.0' = if (!singleAppRegistration) {
+  appId: backendApp!.appId
   appRoleAssignmentRequired: false
 }
 
@@ -103,6 +109,9 @@ resource app 'Microsoft.Graph/applications@v1.0' = {
   uniqueName: 'ai-foundry-agent-${environmentName}'
   displayName: 'ai-foundry-agent-${environmentName}'
   signInAudience: 'AzureADMyOrg'
+  // Single registration: the SPA issues the API access token, so it carries the groups claim when the restriction
+  // is on. Two registrations: not declared (null = left unchanged).
+  groupMembershipClaims: singleAppRegistration ? groupMembershipClaims : null
   serviceManagementReference: empty(serviceManagementReference) ? null : serviceManagementReference
   spa: {
     redirectUris: allowLocalhostRedirects ? [
@@ -111,13 +120,14 @@ resource app 'Microsoft.Graph/applications@v1.0' = {
     ] : []
   }
   api: {
-    // LEGACY scope from the single-registration model. The new API rejects tokens for this app (wrong audience),
-    // but the scope is kept so the previous image keeps working during the rollback window. Remove in two steps
-    // after the rollback window (Entra rejects deleting an enabled scope): 1) isEnabled: false, 2) remove it.
+    // Single registration: this is THE API scope (same id and texts as the pre-split deployment).
+    // Two registrations: LEGACY scope. The new API rejects tokens for this app (wrong audience), but the scope is
+    // kept so the previous image keeps working during the rollback window. Remove in two steps after the rollback
+    // window (Entra rejects deleting an enabled scope): 1) isEnabled: false, 2) remove it.
     oauth2PermissionScopes: [
       {
-        adminConsentDescription: 'LEGACY - Allows the app to read and write chat messages'
-        adminConsentDisplayName: 'LEGACY - Read and write chat messages'
+        adminConsentDescription: singleAppRegistration ? 'Allows the app to read and write chat messages' : 'LEGACY - Allows the app to read and write chat messages'
+        adminConsentDisplayName: singleAppRegistration ? 'Read and write chat messages' : 'LEGACY - Read and write chat messages'
         id: legacyChatReadWriteScopeId
         isEnabled: true
         type: 'User'
@@ -127,10 +137,11 @@ resource app 'Microsoft.Graph/applications@v1.0' = {
       }
     ]
   }
-  // The SPA declares the delegated permission it needs on the backend API.
-  requiredResourceAccess: [
+  // Two registrations: the SPA declares the delegated permission it needs on the backend API.
+  // Single registration: not declared (null = left unchanged, as in the pre-split deployment).
+  requiredResourceAccess: singleAppRegistration ? null : [
     {
-      resourceAppId: backendApp.appId
+      resourceAppId: backendApp!.appId
       resourceAccess: [
         {
           id: backendChatScopeId
@@ -148,11 +159,11 @@ resource sp 'Microsoft.Graph/servicePrincipals@v1.0' = {
   appRoleAssignmentRequired: false
 }
 
-// Optional tenant-wide consent SPA -> backend (admin action).
-resource spaAdminConsent 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = if (grantSpaAdminConsent) {
+// Optional tenant-wide consent SPA -> backend (admin action). Not needed in single-registration mode.
+resource spaAdminConsent 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = if (grantSpaAdminConsent && !singleAppRegistration) {
   clientId: sp.id
   consentType: 'AllPrincipals'
-  resourceId: backendSp.id
+  resourceId: backendSp!.id
   scope: 'Chat.ReadWrite'
 }
 
@@ -164,8 +175,8 @@ resource azureMachineLearningServiceSp 'Microsoft.Graph/servicePrincipals@v1.0' 
   appId: azureMachineLearningAppId
 }
 
-resource oboAdminConsent 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = if (enableObo) {
-  clientId: backendSp.id
+resource oboAdminConsent 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = if (enableObo && !singleAppRegistration) {
+  clientId: backendSp!.id
   consentType: 'AllPrincipals'
   resourceId: azureMachineLearningServiceSp!.id
   scope: 'user_impersonation'
@@ -173,6 +184,7 @@ resource oboAdminConsent 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = if (ena
 
 output frontendClientId string = app.appId
 output frontendAppObjectId string = app.id
-output backendClientId string = backendApp.appId
-output backendAppObjectId string = backendApp.id
-output backendChatScope string = 'api://${backendApp.appId}/Chat.ReadWrite'
+// Single registration: the API audience is the SPA registration itself.
+output backendClientId string = singleAppRegistration ? app.appId : backendApp!.appId
+output backendAppObjectId string = singleAppRegistration ? app.id : backendApp!.id
+output backendChatScope string = 'api://${singleAppRegistration ? app.appId : backendApp!.appId}/Chat.ReadWrite'

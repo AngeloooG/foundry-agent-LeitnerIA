@@ -4,7 +4,8 @@ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Production builds only:
- * 1. Fail when the Entra ids are missing, not GUIDs or equal (a bundle without them cannot sign in).
+ * 1. Fail when the Entra ids are missing or not GUIDs (a bundle without them cannot sign in). Equal ids are the
+ *    single-registration mode; the API decides whether it accepts them (ENTRA_SINGLE_APP_REGISTRATION).
  * 2. Emit `leitneria-build.json` with the ids baked into the bundle. The API compares it with its own
  *    configuration at startup (SpaBundleConsistencyCheck) and refuses to start on a mismatch, so an image built
  *    for another backend registration can never serve traffic.
@@ -28,8 +29,6 @@ export function buildInfoPlugin(): Plugin {
                 !GUID.test(tenant) && "VITE_ENTRA_TENANT_ID must be a GUID",
                 !GUID.test(frontend) && "VITE_ENTRA_FRONTEND_CLIENT_ID must be a GUID",
                 !GUID.test(backend) && "VITE_ENTRA_BACKEND_CLIENT_ID must be a GUID",
-                GUID.test(frontend) && frontend.toLowerCase() === backend.toLowerCase()
-                    && "VITE_ENTRA_BACKEND_CLIENT_ID must differ from VITE_ENTRA_FRONTEND_CLIENT_ID",
             ].filter(Boolean);
             if (problems.length > 0) {
                 this.error(`Invalid Entra build configuration: ${problems.join("; ")}`);
