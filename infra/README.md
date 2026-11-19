@@ -47,6 +47,7 @@ Se configuran como variables de azd (`azd env set NOMBRE valor`), que `main.para
 | `ENABLE_OBO` | false | false | false | On-Behalf-Of hacia Foundry. Un registro de backend separado NO lo activa |
 | `ENTRA_ALLOW_LOCALHOST_REDIRECTS` | false | true | false | Redirect URIs `http://localhost` en el SPA (Bicep y postprovision) |
 | `ENTRA_GRANT_SPA_ADMIN_CONSENT` | false | | | Consentimiento de administrador SPA → backend (requiere rol de administrador de Entra) |
+| `ENTRA_SINGLE_APP_REGISTRATION` | false | true en `env-LeitnerIA` | false | Un solo registro: el SPA es también la audiencia de la API y no se crea la app de backend. Para tenants sin consentimiento de usuario y sin administrador disponible. Incompatible con `ENABLE_OBO` |
 | `TAG_AGENTE` / `TAG_ENTORNO` / `TAG_PLATAFORMA` | LeitnerIA / dev / Foundry | | | Tags de gobierno del resource group y los recursos (sin ellas el provision las borraría) |
 
 ## Despliegue
@@ -60,6 +61,18 @@ azd env set AI_AGENT_ID LeitnerIA
 azd provision --preview                   # revise el plan antes de aplicar
 azd up                                    # provision + build + rollout
 ```
+
+**Entorno ya desplegado pero sin carpeta `.azure/<entorno>` en este equipo:** no use `azd env new` a mano. Recree el entorno a partir de lo desplegado (solo lee Azure; escribe solo el entorno azd local):
+
+```powershell
+./deployment/scripts/import-azd-environment.ps1 -EnvironmentName env-LeitnerIA `
+    -SubscriptionId b6d04525-e7b4-4b17-8492-2471f9779962 -SingleAppRegistration -AllowLocalhostRedirects -DryRun   # solo muestra
+./deployment/scripts/import-azd-environment.ps1 -EnvironmentName env-LeitnerIA `
+    -SubscriptionId b6d04525-e7b4-4b17-8492-2471f9779962 -SingleAppRegistration -AllowLocalhostRedirects           # escribe el entorno
+azd provision --preview                   # esperado: 0 Create / 0 Delete
+```
+
+El nombre del entorno, la suscripción y la región deben ser exactamente los del despliegue: los nombres de los recursos dependen de ellos.
 
 El orden de ejecución:
 
