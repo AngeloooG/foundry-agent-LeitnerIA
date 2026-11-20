@@ -208,6 +208,25 @@ public class EnableOboTests
         Assert.IsFalse(options.UseOnBehalfOf(isDevelopment: false));
         StringAssert.Contains(options.Validate(isDevelopment: false).Single(), "ENABLE_OBO");
     }
+
+    [TestMethod]
+    public void Obo_WithSingleAppRegistration_IsAConfigurationError()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AI_AGENT_ENDPOINT"] = "https://acct/api/projects/p",
+            ["AI_AGENT_ID"] = "a",
+            ["ENTRA_TENANT_ID"] = "00000000-0000-0000-0000-000000000002",
+            ["ENTRA_BACKEND_CLIENT_ID"] = "00000000-0000-0000-0000-000000000001",
+            ["MANAGED_IDENTITY_CLIENT_ID"] = "00000000-0000-0000-0000-0000000000c1",
+            ["ENTRA_SINGLE_APP_REGISTRATION"] = "true",
+            ["ENABLE_OBO"] = "true",
+        }).Build();
+        var options = new FoundryOptions();
+        FoundryOptions.Bind(options, configuration);
+
+        StringAssert.Contains(options.Validate(isDevelopment: false).Single(), "ENTRA_SINGLE_APP_REGISTRATION");
+    }
 }
 
 [TestClass]

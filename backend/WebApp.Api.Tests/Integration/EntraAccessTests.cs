@@ -156,6 +156,71 @@ public class EntraAccessTests
         Assert.AreEqual(HttpStatusCode.OK, (await factory.CreateClient().GetAsync("/api/health")).StatusCode);
     }
 
+    // Single-registration development mode: the SPA registration is also the API audience and issues v1 tokens
+    // (iss https://sts.windows.net/{tid}/, aud api://{spa}), exactly what the pre-split deployment received.
+    private static TestWebApplicationFactory SingleRegistration() =>
+        new(useRealJwt: true, settings: new Dictionary<string, string?>
+        {
+            ["ENTRA_SINGLE_APP_REGISTRATION"] = "true",
+            ["ENTRA_BACKEND_CLIENT_ID"] = TestWebApplicationFactory.FrontendClientId,
+        });
+
+    private static string V1TokenFor(string audience, string scopes = "Chat.ReadWrite") =>
+        TestTokens.Create(
+            issuer: $"https://sts.windows.net/{TestWebApplicationFactory.TenantId}/",
+            audience: audience,
+            scopes: scopes);
+
+    [TestMethod]
+    public async Task SingleRegistration_V1TokenForTheSpaRegistration_IsAllowed()
+    {
+        using var factory = SingleRegistration();
+
+        Assert.AreEqual(HttpStatusCode.OK,
+            await CallAsync(factory, V1TokenFor($"api://{TestWebApplicationFactory.FrontendClientId}")));
+    }
+
+    [TestMethod]
+    public async Task SingleRegistration_TokenForAnotherRegistration_IsRejected()
+    {
+        using var factory = SingleRegistration();
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized,
+            await CallAsync(factory, V1TokenFor($"api://{TestWebApplicationFactory.BackendClientId}")));
+    }
+
+    [TestMethod]
+    public async Task SingleRegistration_TokenWithoutApiScope_IsForbidden()
+    {
+        using var factory = SingleRegistration();
+
+        Assert.AreEqual(HttpStatusCode.Forbidden,
+            await CallAsync(factory, V1TokenFor($"api://{TestWebApplicationFactory.FrontendClientId}", scopes: "User.Read")));
+    }
+
+    [TestMethod]
+    public async Task SingleRegistration_ForeignTenant_IsRejected()
+    {
+        using var factory = SingleRegistration();
+        var token = TestTokens.Create(
+            tenantId: TestTokens.OtherTenantId,
+            issuer: $"https://sts.windows.net/{TestTokens.OtherTenantId}/",
+            audience: $"api://{TestWebApplicationFactory.FrontendClientId}");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, await CallAsync(factory, token));
+    }
+
+    [TestMethod]
+    public void EqualIds_WithoutSingleRegistrationFlag_FailAtStartup()
+    {
+        using var factory = new TestWebApplicationFactory(
+            useRealJwt: true,
+            settings: new Dictionary<string, string?> { ["ENTRA_BACKEND_CLIENT_ID"] = TestWebApplicationFactory.FrontendClientId });
+
+        var exception = Assert.ThrowsExactly<Microsoft.Extensions.Options.OptionsValidationException>(() => factory.CreateClient());
+        StringAssert.Contains(exception.Message, "ENTRA_SINGLE_APP_REGISTRATION");
+    }
+
     [TestMethod]
     [DataRow("ENTRA_ALLOWED_GROUP_ID", "not-a-guid")]
     [DataRow("ENTRA_TENANT_ID", "PLACEHOLDER_SET_VIA_ENTRA_TENANT_ID_ENV_VAR")]
@@ -163,6 +228,7 @@ public class EntraAccessTests
     [DataRow("ENTRA_BACKEND_CLIENT_ID", "")]
     [DataRow("ENTRA_BACKEND_CLIENT_ID", "not-a-guid")]
     [DataRow("ENTRA_SPA_CLIENT_ID", "00000000-0000-0000-0000-000000000001")]
+    [DataRow("ENTRA_SINGLE_APP_REGISTRATION", "yes")]
     public void InvalidEntraConfiguration_FailsAtStartup(string key, string value)
     {
         using var factory = new TestWebApplicationFactory(

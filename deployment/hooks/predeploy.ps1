@@ -29,8 +29,14 @@ if (-not $clientId -or -not $backendClientId -or -not $tenantId) {
     Write-Host "[ERROR] ENTRA_FRONTEND_CLIENT_ID, ENTRA_BACKEND_CLIENT_ID and ENTRA_TENANT_ID are required (run azd provision)" -ForegroundColor Red
     exit 1
 }
-if ($clientId -eq $backendClientId) {
-    Write-Host "[ERROR] ENTRA_BACKEND_CLIENT_ID must differ from ENTRA_FRONTEND_CLIENT_ID" -ForegroundColor Red
+$singleApp = (Get-AzdValue 'ENTRA_SINGLE_APP_REGISTRATION')
+$singleApp = $singleApp -and $singleApp.Trim().ToLowerInvariant() -eq 'true'
+if ($singleApp -and $clientId -ne $backendClientId) {
+    Write-Host "[ERROR] ENTRA_SINGLE_APP_REGISTRATION=true requires ENTRA_BACKEND_CLIENT_ID = ENTRA_FRONTEND_CLIENT_ID (run azd provision)" -ForegroundColor Red
+    exit 1
+}
+if (-not $singleApp -and $clientId -eq $backendClientId) {
+    Write-Host "[ERROR] ENTRA_BACKEND_CLIENT_ID must differ from ENTRA_FRONTEND_CLIENT_ID (or set ENTRA_SINGLE_APP_REGISTRATION=true for development)" -ForegroundColor Red
     exit 1
 }
 if (-not $acrName) {

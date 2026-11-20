@@ -57,6 +57,62 @@ public class EntraOptionsTests
     }
 
     [TestMethod]
+    public void SingleRegistrationMode_AllowsEqualIds()
+    {
+        var options = Valid();
+        options.BackendClientId = Frontend;
+        options.SingleAppRegistration = true;
+
+        Assert.AreEqual(0, options.Validate().Count());
+        CollectionAssert.AreEqual(new[] { Frontend, $"api://{Frontend}" }, options.Audiences.ToArray());
+    }
+
+    [TestMethod]
+    public void SingleRegistrationMode_WithDifferentIds_IsInvalid()
+    {
+        var options = Valid();
+        options.SingleAppRegistration = true;
+
+        StringAssert.Contains(options.Validate().Single(), EntraOptions.SingleAppRegistrationVariable);
+    }
+
+    [TestMethod]
+    [DataRow(null, false)]
+    [DataRow("", false)]
+    [DataRow("false", false)]
+    [DataRow("TRUE", true)]
+    [DataRow(" true ", true)]
+    public void SingleRegistrationVariable_IsAStrictBoolean(string? value, bool expected)
+    {
+        var options = EntraOptions.From(Configuration(value));
+
+        Assert.AreEqual(expected, options.SingleAppRegistration);
+        Assert.IsNull(options.InvalidSingleAppRegistrationValue);
+    }
+
+    [TestMethod]
+    [DataRow("yes")]
+    [DataRow("1")]
+    public void SingleRegistrationVariable_InvalidValue_IsReported(string value)
+    {
+        var options = EntraOptions.From(Configuration(value));
+
+        Assert.IsFalse(options.SingleAppRegistration);
+        Assert.IsTrue(options.Validate().Any(e => e.Contains(EntraOptions.SingleAppRegistrationVariable)));
+    }
+
+    private static IConfiguration Configuration(string? singleApp) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ENTRA_TENANT_ID"] = Tenant,
+                ["ENTRA_FRONTEND_CLIENT_ID"] = Frontend,
+                ["ENTRA_BACKEND_CLIENT_ID"] = Frontend,
+                ["ENTRA_SINGLE_APP_REGISTRATION"] = singleApp,
+            })
+            .Build();
+
+    [TestMethod]
     public void LegacySpaVariable_IsRejected()
     {
         var options = Valid();

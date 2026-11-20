@@ -25,13 +25,27 @@ if (-not $account) {
 Write-Host "[OK] Azure CLI: $($account.user.name)" -ForegroundColor Green
 
 # Explicit booleans: only "true", "false" or empty are accepted (a typo must never change identity settings).
-foreach ($flag in @('ENTRA_ALLOW_LOCALHOST_REDIRECTS', 'ENTRA_GRANT_SPA_ADMIN_CONSENT', 'ENABLE_OBO')) {
+$flags = @{}
+foreach ($flag in @('ENTRA_ALLOW_LOCALHOST_REDIRECTS', 'ENTRA_GRANT_SPA_ADMIN_CONSENT', 'ENABLE_OBO', 'ENTRA_SINGLE_APP_REGISTRATION')) {
     $flagValue = (azd env get-value $flag 2>&1) | Where-Object { $_ -notmatch 'ERROR' } | Select-Object -First 1
     $flagValue = if ($flagValue) { $flagValue.Trim().ToLowerInvariant() } else { "" }
     if ($flagValue -notin @("", "true", "false")) {
         Write-Host "[ERROR] $flag must be 'true' or 'false' (got '$flagValue')" -ForegroundColor Red
         exit 1
     }
+    $flags[$flag] = $flagValue -eq "true"
+}
+
+# Entra registration model. Single registration (development only): the SPA registration is also the API audience,
+# no backend registration is created and no new consent is needed. OBO needs a separate backend registration.
+if ($flags['ENTRA_SINGLE_APP_REGISTRATION']) {
+    if ($flags['ENABLE_OBO']) {
+        Write-Host "[ERROR] ENABLE_OBO=true requires two registrations (ENTRA_SINGLE_APP_REGISTRATION=false)" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[OK] Entra: single registration (SPA = API audience). Development mode, no backend app is created." -ForegroundColor Yellow
+} else {
+    Write-Host "[OK] Entra: two registrations (SPA + backend API). Users need consent for the backend scope (admin consent if user consent is disabled)." -ForegroundColor Green
 }
 
 # Optional group restriction: empty = every user of the tenant; otherwise it must be a group object id (GUID).

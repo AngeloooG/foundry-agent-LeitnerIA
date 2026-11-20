@@ -1,10 +1,12 @@
 import type { Configuration } from "@azure/msal-browser";
 import { LogLevel } from "@azure/msal-browser";
 
-// Build-time configuration (public identifiers). Two app registrations:
+// Build-time configuration (public identifiers):
 //  - VITE_ENTRA_FRONTEND_CLIENT_ID: this SPA (MSAL client id, interactive sign-in).
 //  - VITE_ENTRA_BACKEND_CLIENT_ID: the API registration; its Chat.ReadWrite scope is the only one requested.
-// There is deliberately NO fallback from the backend id to the frontend id: the API rejects SPA-audience tokens.
+// Both are always explicit: there is NO fallback from one to the other. They are equal only in the
+// single-registration development mode, which the API must enable itself (ENTRA_SINGLE_APP_REGISTRATION=true);
+// otherwise the API refuses to start with this bundle (SpaBundleConsistencyCheck + EntraOptions).
 const clientId = import.meta.env.VITE_ENTRA_FRONTEND_CLIENT_ID;
 
 if (!clientId) {
@@ -18,10 +20,6 @@ const backendClientId = import.meta.env.VITE_ENTRA_BACKEND_CLIENT_ID;
 
 if (!backendClientId) {
   throw new Error("VITE_ENTRA_BACKEND_CLIENT_ID is not set. It must be provided at build time.");
-}
-
-if (backendClientId.toLowerCase() === clientId.toLowerCase()) {
-  throw new Error("VITE_ENTRA_BACKEND_CLIENT_ID must differ from VITE_ENTRA_FRONTEND_CLIENT_ID.");
 }
 
 /** Delegated scope exposed by the backend registration: api://<BACKEND_CLIENT_ID>/Chat.ReadWrite */

@@ -89,6 +89,25 @@ Todo está en `backend/WebApp.Api/Security/`. Ningún endpoint repite estas comp
 
 La ausencia de grupo **nunca** desactiva la validación del token: issuer, tenant, audiencia, firma y expiración se validan siempre.
 
+### Modo de un solo registro (desarrollo)
+
+El tenant de CONSEIN no permite que los usuarios den consentimiento a aplicaciones. Con dos registros (SPA + API), el permiso del SPA sobre el scope del backend necesita **consentimiento de administrador**. Mientras no lo haya, el entorno de desarrollo usa `ENTRA_SINGLE_APP_REGISTRATION=true`:
+
+| Aspecto | Dos registros (por defecto) | Un solo registro (`env-LeitnerIA`) |
+|---|---|---|
+| Registros de Entra | SPA + API de backend | Solo el SPA (`ai-foundry-agent-<entorno>`), como antes de la separación |
+| Audiencia aceptada | `{backend}` / `api://{backend}` | `{spa}` / `api://{spa}` (tokens v1) |
+| Scope que pide el SPA | `api://{backend}/Chat.ReadWrite` | `api://{spa}/Chat.ReadWrite` (id `b4b16681-…`, el mismo de siempre) |
+| Consentimiento | Del administrador si el de usuario está desactivado | Ninguno nuevo: la app pide su propio scope |
+| OBO | Posible | No disponible (la API y `preprovision` lo rechazan) |
+| Validación de la API | Igual en ambos: tenant fijado, issuer, firma, expiración, scope, grupo opcional, aislamiento por usuario | |
+
+Reglas:
+
+- El modo es **explícito**. Si los dos ids coinciden sin la variable, la API no arranca y `predeploy` y `postprovision` fallan. Si la variable está activa y los ids difieren, también.
+- Se pierde la separación de audiencias: un token emitido para el SPA es válido para la API. Con OBO desactivado y una sola aplicación que consume la API, el impacto es bajo.
+- **Producción** debe usar dos registros y el consentimiento de administrador (`ENTRA_GRANT_SPA_ADMIN_CONSENT=true`, desplegado por un administrador, o concedido en *Enterprise applications*). La alternativa sin administrador es preautorizar el SPA en la app de backend (`api.preAuthorizedApplications`), que no está implementada ni probada.
+
 ### Restricción por grupo: detalles
 
 - Cuando `ENTRA_ALLOWED_GROUP_ID` tiene valor, Bicep activa `groupMembershipClaims: SecurityGroup` en la app (y en la app de OBO, si existe) para que el access token incluya el claim `groups`.
